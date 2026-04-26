@@ -2,7 +2,7 @@
 
 Fast Zeabur webhook for ordinary diabetes patient-education questions.
 
-This service answers LINE text messages directly with OpenAI and does not start
+This service answers LINE text messages directly with Gemini API and does not start
 Hermes Agent. Keep Hermes Agent for scheduled diabetes news, academic search,
 Obsidian/Google Drive archiving, image generation, and audio generation.
 
@@ -16,11 +16,15 @@ Obsidian/Google Drive archiving, image generation, and audio generation.
 ```bash
 LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
-OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-4.1-mini
-OPENAI_TIMEOUT=20
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-3.1-flash-lite-preview
+GEMINI_TIMEOUT=20
 LINE_TIMEOUT=12
 ```
+
+`GOOGLE_API_KEY` is also accepted as a fallback. If Google AI Studio changes the
+preview model name, set `GEMINI_MODEL` to the new model name in Zeabur without
+changing the code.
 
 ## LINE Webhook URL
 

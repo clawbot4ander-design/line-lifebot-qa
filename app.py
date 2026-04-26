@@ -13,9 +13,9 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Request
 
 
-OPENAI_API_URL = "https://api.openai.com/v1/responses"
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-OPENAI_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT", "20"))
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
+GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "20"))
 LINE_TIMEOUT = int(os.getenv("LINE_TIMEOUT", "12"))
 
 app = FastAPI(title="LifeBot Fast LINE QA")
@@ -87,50 +87,56 @@ def source_target(event: dict[str, Any]) -> str:
     return source.get("userId") or source.get("groupId") or source.get("roomId") or ""
 
 
-def extract_response_text(payload: dict[str, Any]) -> str:
-    if isinstance(payload.get("output_text"), str):
-        return payload["output_text"].strip()
+def extract_gemini_text(payload: dict[str, Any]) -> str:
     parts: list[str] = []
-    for item in payload.get("output", []):
-        for content in item.get("content", []):
-            if content.get("type") in {"output_text", "text"} and content.get("text"):
-                parts.append(str(content["text"]))
+    for candidate in payload.get("candidates", []):
+        content = candidate.get("content", {})
+        for part in content.get("parts", []):
+            if part.get("text"):
+                parts.append(str(part["text"]))
     return "\n".join(parts).strip()
 
 
-def openai_answer(user_text: str) -> str:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+def gemini_answer(user_text: str) -> str:
+    api_key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
     if not api_key:
-        return "目前快速問答服務尚未設定 OpenAI API key。若你有血糖不舒服、低血糖症狀或血糖持續很高，請先聯絡醫療團隊。"
+        return "目前快速問答服務尚未設定 Gemini API key。若你有血糖不舒服、低血糖症狀或血糖持續很高，請先聯絡醫療團隊。"
 
     body = {
-        "model": OPENAI_MODEL,
-        "instructions": SYSTEM_PROMPT,
-        "input": f"病友問題：{user_text}",
-        "max_output_tokens": 650,
-        "temperature": 0.4,
+        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": f"病友問題：{user_text}"}],
+            }
+        ],
+        "generationConfig": {
+            "maxOutputTokens": 650,
+            "temperature": 0.4,
+        },
     }
+    target_url = f"{GEMINI_API_BASE}/{GEMINI_MODEL}:generateContent"
     request = urllib.request.Request(
-        OPENAI_API_URL,
+        target_url,
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {api_key}",
+            "x-goog-api-key": api_key,
             "Content-Type": "application/json",
         },
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=OPENAI_TIMEOUT) as response:
+        with urllib.request.urlopen(request, timeout=GEMINI_TIMEOUT) as response:
             payload = json.loads(response.read().decode("utf-8", errors="replace"))
-        answer = extract_response_text(payload)
+        answer = extract_gemini_text(payload)
         if answer:
             return answer[:4900]
         return "目前系統暫時沒有產生完整回覆。若你有明顯不舒服或血糖異常，請先聯絡醫療團隊。"
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:200]
-        print(f"OpenAI HTTP {exc.code}: {detail}")
+        print(f"Gemini HTTP {exc.code}: {detail}")
     except Exception as exc:
-        print(f"OpenAI request failed: {type(exc).__name__}: {exc}")
+        print(f"Gemini request failed: {type(exc).__name__}: {exc}")
     return "目前快速問答暫時無法回覆。若你有低血糖症狀、血糖持續很高、胸痛、意識不清或明顯不舒服，請先聯絡醫療團隊或就醫。"
 
 
@@ -143,7 +149,7 @@ async def handle_text_event(event: dict[str, Any]) -> None:
         return
 
     loop = asyncio.get_running_loop()
-    answer = await loop.run_in_executor(None, openai_answer, user_text)
+    answer = await loop.run_in_executor(None, gemini_answer, user_text)
     if reply_token:
         ok, status = line_reply_text(reply_token, answer)
         print(f"LINE fast QA reply status: {status}")
@@ -160,8 +166,8 @@ def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "line-lifebot-qa",
-        "model": OPENAI_MODEL,
-        "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+        "model": GEMINI_MODEL,
+        "gemini_configured": bool(os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()),
         "line_configured": bool(os.getenv("LINE_CHANNEL_SECRET", "").strip() and os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()),
     }
 
