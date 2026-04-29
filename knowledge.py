@@ -257,12 +257,20 @@ def knowledge_source_files(root: Path, extra_paths: list[Path]) -> list[Path]:
 def guideline_source_label(source_name: str) -> str:
     lower = source_name.lower()
     if "kdigo" in lower:
-        return "KDIGO 2026 Diabetes and CKD Guideline Update Public Review Draft"
+        return "KDIGO 2026 Diabetes and CKD Guideline Update"
     if "aace" in lower:
         return "AACE 2026"
     if "ada" in lower or re.search(r"dc26s\d+", lower):
         return "ADA Standards of Care in Diabetes 2026"
     return "本地糖尿病指南知識庫"
+
+
+def public_metadata(value: str) -> str:
+    value = re.sub(r"public\s+review\s+draft", "", value, flags=re.I)
+    value = re.sub(r"\bdraft\b", "", value, flags=re.I)
+    value = re.sub(r"\s+", " ", value)
+    value = value.replace(" - ", " ").replace("--", "-")
+    return value.strip(" -_")
 
 
 def load_knowledge_base() -> KnowledgeBase | None:
@@ -331,15 +339,14 @@ def knowledge_prompt(query: str) -> str:
         "嚴格回答規則：只能根據以下片段回答；不要使用模型內建知識、一般醫學常識或推測補完。",
         "若以下片段不足以直接回答使用者問題，請明確說指南片段不足，並停止回答，不要改用其他來源補充。",
         "回答方式：先用 1 句話直接回答，再用 2 到 4 個重點整理指南片段支持的內容；若有藥物限制或 eGFR 門檻，請清楚列出，但不要提供個人化劑量。",
-        "來源標示：回答中請自然標示依據來源，例如「根據 ADA 2026 片段」、「根據 KDIGO 2026 draft 片段」或「根據 AACE 2026 片段」。",
+        "來源標示：回答中請自然標示依據來源，例如「根據 ADA 2026 片段」、「根據 KDIGO 2026 片段」或「根據 AACE 2026 片段」；不要使用 draft 或 public review draft 字樣。",
     ]
     for index, hit in enumerate(hits, start=1):
         lines.extend(
             [
-                f"\n[{index}] {hit.title}",
+                f"\n[{index}] {public_metadata(hit.title)}",
                 f"來源指南：{hit.source_label}",
-                f"來源檔案：{hit.source}",
-                f"章節：{hit.section}",
+                f"章節：{public_metadata(hit.section)}",
                 f"片段：{hit.excerpt}",
             ]
         )

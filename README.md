@@ -121,7 +121,7 @@ After redeploy, `GET /` should show:
   "sources": [
     "AACE 2026",
     "ADA Standards of Care in Diabetes 2026",
-    "KDIGO 2026 Diabetes and CKD Guideline Update Public Review Draft"
+    "KDIGO 2026 Diabetes and CKD Guideline Update"
   ]
 }
 ```
