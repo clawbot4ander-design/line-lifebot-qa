@@ -17,7 +17,7 @@ Obsidian/Google Drive archiving, image generation, and audio generation.
 LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
 GEMINI_API_KEY=...
-APP_VERSION=2026-04-30-multi-query-retrieval-v7
+APP_VERSION=2026-04-30-coverage-retrieval-v8
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
 GEMINI_TIMEOUT=20
 LINE_QUERY_PLANNING_ENABLED=1
@@ -45,7 +45,7 @@ LINE_KNOWLEDGE_EXCERPT_CHARS=900
 Minimum variables to add or verify in Zeabur:
 
 ```bash
-APP_VERSION=2026-04-30-multi-query-retrieval-v7
+APP_VERSION=2026-04-30-coverage-retrieval-v8
 LINE_MEMORY_ENABLED=1
 LINE_CONTEXT_ENABLED=1
 LINE_SESSION_SCOPE=user
@@ -168,11 +168,14 @@ Per message, the flow is:
 3. Split table rows into separate retrievable snippets so medication tables,
    eGFR thresholds, contraindications, and dosing/use considerations can rank
    independently.
-4. Retrieve a candidate pool, then ask Gemini to rerank only those candidates
+4. Merge candidates with coverage-aware and MMR-style selection so complementary
+   evidence facets, sources, and sections are less likely to be crowded out by
+   repeated snippets from one chapter.
+5. Retrieve a candidate pool, then ask Gemini to rerank only those candidates
    and decide whether the snippets cover all core concepts in the question.
-5. Ask Gemini to organize only the selected guideline snippets into an evidence
+6. Ask Gemini to organize only the selected guideline snippets into an evidence
    review, including source names and coverage gaps.
-6. Generate the final Traditional Chinese LINE answer from the guideline
+7. Generate the final Traditional Chinese LINE answer from the guideline
    snippets and evidence review.
 
 The final answer prompt still forbids Gemini from using its built-in medical
@@ -268,7 +271,7 @@ The health check should include:
 
 ```json
 {
-  "app_version": "2026-04-30-multi-query-retrieval-v7",
+  "app_version": "2026-04-30-coverage-retrieval-v8",
   "features": {
     "english_name_memory": true,
     "trailing_question_removal": true,
@@ -283,6 +286,8 @@ The health check should include:
     "multi_query_retrieval": true,
     "intent_query_variants": true,
     "metadata_indexing": true,
+    "coverage_aware_retrieval": true,
+    "mmr_style_diversity": true,
     "llm_reranker": true,
     "coverage_answerability_check": true,
     "ada_strict_grounding": true,

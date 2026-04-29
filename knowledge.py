@@ -244,6 +244,13 @@ class KnowledgeHit:
     score: float
 
 
+@dataclass(frozen=True)
+class QueryVariant:
+    label: str
+    text: str
+    weight: float = 0.82
+
+
 class KnowledgeBase:
     def __init__(self, root: Path, extra_paths: list[Path] | None = None, chunk_chars: int = 1800) -> None:
         self.root = root
@@ -373,14 +380,13 @@ class KnowledgeBase:
         return hits
 
     def search_multi(self, query: str, limit: int = 3, excerpt_chars: int = 520) -> list[KnowledgeHit]:
-        variants = query_variants(query)
+        variants = query_variant_specs(query)
         candidates: dict[tuple[str, ...], KnowledgeHit] = {}
-        for variant_index, variant in enumerate(variants):
+        for variant in variants:
             variant_limit = max(limit * 2, limit + 8)
-            variant_weight = 1.0 if variant_index == 0 else 0.82
-            for rank, hit in enumerate(self.search(variant, limit=variant_limit, excerpt_chars=excerpt_chars), start=1):
+            for rank, hit in enumerate(self.search(variant.text, limit=variant_limit, excerpt_chars=excerpt_chars), start=1):
                 key = hit_dedup_key(hit)
-                fused_score = hit.score * variant_weight + 35.0 / (rank + 1)
+                fused_score = hit.score * variant.weight + 35.0 / (rank + 1)
                 existing = candidates.get(key)
                 if not existing or fused_score > existing.score:
                     candidates[key] = KnowledgeHit(
@@ -392,7 +398,7 @@ class KnowledgeBase:
                         excerpt=hit.excerpt,
                         score=fused_score,
                     )
-        return sorted(candidates.values(), key=lambda hit: hit.score, reverse=True)[:limit]
+        return coverage_rerank_hits(query, list(candidates.values()), limit)
 
     def _score(self, query_tokens: list[str], chunk: KnowledgeChunk) -> float:
         token_counts: dict[str, int] = {}
@@ -716,7 +722,11 @@ def hit_dedup_key(hit: KnowledgeHit) -> tuple[str, ...]:
 
 
 def query_variants(query: str) -> list[str]:
-    variants: list[str] = [query]
+    return [variant.text for variant in query_variant_specs(query)]
+
+
+def query_variant_specs(query: str) -> list[QueryVariant]:
+    variants: list[QueryVariant] = [QueryVariant("original", query, 1.0)]
     query_lower = query.lower()
 
     expansion_terms: list[str] = []
@@ -724,11 +734,11 @@ def query_variants(query: str) -> list[str]:
         if key in query:
             expansion_terms.extend(terms)
     if expansion_terms:
-        variants.append(" ".join([query, *dedupe_terms(expansion_terms)]))
+        variants.append(QueryVariant("synonyms", " ".join([query, *dedupe_terms(expansion_terms)]), 0.9))
 
     for triggers, intent_queries in QUERY_INTENT_VARIANTS:
         if any(trigger in query or trigger in query_lower for trigger in triggers):
-            variants.extend(f"{query} {intent_query}" for intent_query in intent_queries)
+            variants.extend(QueryVariant("section_intent", f"{query} {intent_query}", 0.84) for intent_query in intent_queries)
 
     pregnancy_query = any(term in query for term in ("懷孕", "妊娠", "孕")) or any(
         term in query_lower for term in ("pregnancy", "gestational", "gdm")
@@ -738,22 +748,48 @@ def query_variants(query: str) -> list[str]:
     )
     if pregnancy_query and diagnosis_query:
         variants.append(
-            f"{query} gestational diabetes mellitus GDM screening diagnosis Table 2.8 one-step two-step OGTT 24-28 weeks fasting 1 h 2 h Carpenter-Coustan IADPSG"
+            QueryVariant(
+                "clinical_context",
+                f"{query} gestational diabetes mellitus GDM screening diagnosis Table 2.8 one-step two-step OGTT 24-28 weeks fasting 1 h 2 h Carpenter-Coustan IADPSG",
+                0.88,
+            )
+        )
+
+    dialysis_query = any(term in query for term in ("洗腎", "透析", "腎衰竭")) or any(
+        term in query_lower for term in ("dialysis", "hemodialysis", "kidney failure", "eskd", "esrd")
+    )
+    glycemic_goal_query = any(term in query for term in ("血糖控制", "控制目標", "血糖目標", "目標")) or any(
+        term in query_lower for term in ("glycemic goal", "glycemic target", "glucose target", "a1c goal")
+    )
+    if dialysis_query and glycemic_goal_query:
+        variants.extend(
+            [
+                QueryVariant(
+                    "disease_context",
+                    f"{query} diabetes CKD stage 5 dialysis ESKD glycemic targets individualized goals hypoglycemia risk",
+                    0.9,
+                ),
+                QueryVariant(
+                    "measurement_method",
+                    f"{query} A1C reliability advanced CKD dialysis glycated albumin fructosamine CGM BGM glucose monitoring",
+                    0.9,
+                ),
+            ]
         )
 
     if len(variants) == 1:
         tokens = list(expand_query_tokens(query))
         if tokens:
-            variants.append(" ".join(tokens))
+            variants.append(QueryVariant("expanded_tokens", " ".join(tokens), 0.84))
 
-    deduped: list[str] = []
+    deduped: list[QueryVariant] = []
     seen: set[str] = set()
     for variant in variants:
-        compact = re.sub(r"\s+", " ", variant).strip()
+        compact = re.sub(r"\s+", " ", variant.text).strip()
         key = compact.lower()
         if compact and key not in seen:
             seen.add(key)
-            deduped.append(compact)
+            deduped.append(QueryVariant(variant.label, compact, variant.weight))
     return deduped[:8]
 
 
@@ -766,6 +802,152 @@ def dedupe_terms(terms: Iterable[str]) -> list[str]:
             seen.add(key)
             result.append(term)
     return result
+
+
+def coverage_rerank_hits(query: str, hits: list[KnowledgeHit], limit: int) -> list[KnowledgeHit]:
+    if not hits:
+        return []
+
+    sorted_hits = sorted(hits, key=lambda hit: hit.score, reverse=True)
+    target_facets = required_facets(query)
+    selected: list[KnowledgeHit] = []
+    covered: set[str] = set()
+    remaining = sorted_hits[: max(limit * 5, limit + 20)]
+    max_score = max((hit.score for hit in remaining), default=1.0)
+
+    while remaining and len(selected) < limit:
+        best_index = 0
+        best_value = -1.0
+        for index, hit in enumerate(remaining):
+            facets = hit_facets(hit)
+            new_target_facets = (facets & target_facets) - covered
+            new_general_facets = facets - covered
+            score_component = hit.score / max_score
+            general_bonus = 0.12 * min(len(new_general_facets), 3) if target_facets else 0.03 * min(len(new_general_facets), 2)
+            coverage_bonus = 0.42 * len(new_target_facets) + general_bonus
+            diversity_bonus = 0.0
+            if selected and all(hit.source != item.source for item in selected):
+                diversity_bonus += 0.08
+            if selected and all(hit.section != item.section for item in selected):
+                diversity_bonus += 0.08
+            redundancy_penalty = 0.0
+            if target_facets and not (facets & target_facets):
+                redundancy_penalty += 0.45
+            if target_facets:
+                redundancy_penalty += 0.12 * len(target_facets - facets)
+            if "hypoglycemia" in target_facets and "hypoglycemia" not in facets:
+                redundancy_penalty += 0.35
+            if "foot_care" in target_facets and "foot_care" not in facets:
+                redundancy_penalty += 0.35
+            if "frequency" in target_facets and "frequency" not in facets:
+                redundancy_penalty += 0.28
+            if any(hit.source == item.source and hit.section == item.section and hit.chunk_type == item.chunk_type for item in selected):
+                redundancy_penalty += 0.35
+            if any(text_similarity(hit.excerpt, item.excerpt) > 0.62 for item in selected):
+                redundancy_penalty += 0.25
+            value = score_component + coverage_bonus + diversity_bonus - redundancy_penalty
+            if value > best_value:
+                best_value = value
+                best_index = index
+        chosen = remaining.pop(best_index)
+        selected.append(chosen)
+        covered.update(hit_facets(chosen))
+
+    return selected
+
+
+def required_facets(query: str) -> set[str]:
+    lower = query.lower()
+    facets: set[str] = set()
+    if any(term in query for term in ("洗腎", "透析", "腎衰竭", "腎", "腎絲球")) or any(
+        term in lower for term in ("dialysis", "kidney", "ckd", "egfr", "eskd", "esrd")
+    ):
+        facets.add("kidney_context")
+    if any(term in query for term in ("血糖控制", "控制目標", "血糖目標", "目標")) or any(
+        term in lower for term in ("glycemic goal", "glycemic target", "glucose target", "a1c goal")
+    ):
+        facets.add("glycemic_target")
+    if any(term in query for term in ("洗腎", "透析", "腎衰竭")) or any(
+        term in lower for term in ("dialysis", "kidney failure", "eskd", "esrd")
+    ):
+        facets.update({"a1c_reliability", "monitoring"})
+    if any(term in query for term in ("連續血糖", "血糖機", "監測")) or any(
+        term in lower for term in ("cgm", "bgm", "smbg", "monitoring", "time in range")
+    ):
+        facets.add("monitoring")
+    if any(term in query for term in ("藥", "用藥", "胰島素")) or any(
+        term in lower for term in ("medication", "pharmacologic", "sglt", "glp", "insulin", "metformin")
+    ):
+        facets.add("medication")
+    if any(term in query for term in ("egfr", "門檻", "多少", "幾")) or any(
+        term in lower for term in ("threshold", "criteria", "mg/dl", "ml/min", "egfr")
+    ):
+        facets.add("threshold")
+    if any(term in query for term in ("診斷", "篩檢", "標準")) or any(
+        term in lower for term in ("diagnosis", "screening", "criteria", "ogtt")
+    ):
+        facets.add("diagnosis")
+    if any(term in query for term in ("腳", "足", "足部", "神經")) or any(
+        term in lower for term in ("foot", "neuropathy", "monofilament", "ulcer")
+    ):
+        facets.add("foot_care")
+    if any(term in query for term in ("多久", "幾次", "頻率", "一次", "每年")) or any(
+        term in lower for term in ("frequency", "annually", "months", "yearly", "every")
+    ):
+        facets.add("frequency")
+    if any(term in query for term in ("懷孕", "妊娠", "孕")) or any(term in lower for term in ("pregnancy", "gestational", "gdm")):
+        facets.add("pregnancy")
+    if "低血糖" in query or "hypoglycemia" in lower:
+        facets.update({"hypoglycemia", "treatment"})
+    if any(term in query for term in ("處理", "治療", "怎麼辦")) or any(term in lower for term in ("treatment", "management")):
+        facets.add("treatment")
+    return facets
+
+
+def hit_facets(hit: KnowledgeHit) -> set[str]:
+    haystack = f"{hit.source} {hit.source_label} {hit.title} {hit.section} {hit.chunk_type} {hit.excerpt}".lower()
+    facets: set[str] = set()
+    if re.search(r"\b(ckd|kidney|renal|egfr|albuminuria|uacr|dialysis|eskd|esrd)\b", haystack):
+        facets.add("kidney_context")
+    if re.search(r"\b(glycemic goal|glycemic target|glucose target|a1c goal|individualized goal|treatment goals)\b", haystack):
+        facets.add("glycemic_target")
+    if re.search(r"\b(a1c.*less reliable|less reliable.*a1c|glycated albumin|fructosamine|red blood cell turnover)\b", haystack):
+        facets.add("a1c_reliability")
+    if re.search(r"\b(cgm|bgm|smbg|glucose monitoring|time in range|tir|time below range|time above range)\b", haystack):
+        facets.add("monitoring")
+    if re.search(r"\b(sglt2|glp-1|insulin|metformin|finerenone|glucagon|pharmacologic|medication|dose|dosage)\b", haystack):
+        facets.add("medication")
+    if re.search(r"\b(mg/dl|mmol/l|ml/min|%|threshold|criteria|fasting|1 h|2 h|3 h|≥|<=|<|>)\b", haystack):
+        facets.add("threshold")
+    if re.search(r"\b(diagnosis|diagnostic|screening|ogtt|classification|criteria)\b", haystack):
+        facets.add("diagnosis")
+    if re.search(r"\b(foot|neuropathy|monofilament|ulcer|protective sensation|peripheral artery|pad|lops|podiatrist)\b", haystack):
+        facets.add("foot_care")
+    if re.search(r"\b(annually|every \d|months?|yearly|frequency|examination frequency|at least yearly)\b", haystack):
+        facets.add("frequency")
+    if re.search(r"\b(pregnancy|gestational|gdm|preconception|postpartum)\b", haystack):
+        facets.add("pregnancy")
+    if "hypoglycemia" in haystack:
+        facets.add("hypoglycemia")
+    if re.search(r"\b(treatment|therapy|management|intervention|recommendation|recommended|prescribed)\b", haystack):
+        facets.add("treatment")
+    if hit.chunk_type == "table_row":
+        facets.add("table")
+    if "kdigo" in haystack:
+        facets.add("source_kdigo")
+    elif "aace" in haystack:
+        facets.add("source_aace")
+    elif "ada standards" in haystack or re.search(r"\bdc26s\d+\b", haystack):
+        facets.add("source_ada")
+    return facets
+
+
+def text_similarity(left: str, right: str) -> float:
+    left_tokens = set(tokenize(left))
+    right_tokens = set(tokenize(right))
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
 
 
 def expand_query_tokens(query: str) -> Iterable[str]:

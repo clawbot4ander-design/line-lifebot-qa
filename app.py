@@ -57,7 +57,7 @@ except ModuleNotFoundError:
 
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-APP_VERSION = os.getenv("APP_VERSION", "2026-04-30-multi-query-retrieval-v7")
+APP_VERSION = os.getenv("APP_VERSION", "2026-04-30-coverage-retrieval-v8")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "20"))
 LINE_QUERY_PLANNING_ENABLED = os.getenv("LINE_QUERY_PLANNING_ENABLED", "1").strip().lower() not in {
@@ -935,6 +935,8 @@ def health() -> dict[str, Any]:
             "multi_query_retrieval": True,
             "intent_query_variants": True,
             "metadata_indexing": True,
+            "coverage_aware_retrieval": True,
+            "mmr_style_diversity": True,
             "llm_reranker": LINE_LLM_RERANK_ENABLED,
             "coverage_answerability_check": True,
             "ada_strict_grounding": True,
