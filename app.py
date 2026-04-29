@@ -19,10 +19,16 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, Header, HTTPException, Request
 
 try:
-    from knowledge import knowledge_answerable, knowledge_no_answer_text, knowledge_prompt, knowledge_status
+    from knowledge import (
+        KnowledgeHit,
+        knowledge_candidates_prompt,
+        knowledge_no_answer_text,
+        knowledge_prompt_from_hits,
+        knowledge_status,
+        search_knowledge_candidates,
+    )
 except ModuleNotFoundError:
-    def knowledge_answerable(query: str) -> bool:
-        return False
+    KnowledgeHit = Any
 
     def knowledge_no_answer_text() -> str:
         return (
@@ -30,7 +36,13 @@ except ModuleNotFoundError:
             "為了避免提供不準確的資訊，我先不回答這個問題。"
         )
 
-    def knowledge_prompt(query: str) -> str:
+    def search_knowledge_candidates(query: str) -> list[Any]:
+        return []
+
+    def knowledge_candidates_prompt(hits: list[Any]) -> str:
+        return "\n\n候選指南片段：目前部署環境沒有載入 knowledge.py。"
+
+    def knowledge_prompt_from_hits(hits: list[Any]) -> str:
         return (
             "\n\n背景知識檢索：目前部署環境沒有載入 knowledge.py，"
             "請不要使用模型內建知識回答。"
@@ -45,7 +57,7 @@ except ModuleNotFoundError:
 
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-APP_VERSION = os.getenv("APP_VERSION", "2026-04-30-multi-guideline-v5")
+APP_VERSION = os.getenv("APP_VERSION", "2026-04-30-medical-retrieval-v6")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "20"))
 LINE_QUERY_PLANNING_ENABLED = os.getenv("LINE_QUERY_PLANNING_ENABLED", "1").strip().lower() not in {
@@ -60,6 +72,13 @@ LINE_EVIDENCE_REVIEW_ENABLED = os.getenv("LINE_EVIDENCE_REVIEW_ENABLED", "1").st
     "no",
     "off",
 }
+LINE_LLM_RERANK_ENABLED = os.getenv("LINE_LLM_RERANK_ENABLED", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+LINE_LLM_RERANK_TOP_K = int(os.getenv("LINE_LLM_RERANK_TOP_K", "5"))
 LINE_RETRIEVAL_QUERY_MAX_CHARS = int(os.getenv("LINE_RETRIEVAL_QUERY_MAX_CHARS", "1400"))
 LINE_TIMEOUT = int(os.getenv("LINE_TIMEOUT", "12"))
 LINE_MEMORY_ENABLED = os.getenv("LINE_MEMORY_ENABLED", "1").strip() != "0"
@@ -649,6 +668,75 @@ def build_retrieval_query(api_key: str, user_text: str, recent_context: str) -> 
     return combined[:LINE_RETRIEVAL_QUERY_MAX_CHARS] or user_text
 
 
+def select_guideline_hits(api_key: str, user_text: str, candidates: list[KnowledgeHit]) -> tuple[list[KnowledgeHit], bool, str]:
+    if not candidates:
+        return [], False, "沒有候選片段。"
+    if not LINE_LLM_RERANK_ENABLED or not api_key:
+        return candidates[:LINE_LLM_RERANK_TOP_K], True, "LLM reranker disabled; using local ranking."
+
+    system_text = (
+        "你是醫療指南檢索 reranker，不是回答者。"
+        "你只能根據候選指南片段判斷哪些片段最能回答使用者問題。"
+        "不要提供醫療建議，不要使用模型內建知識，不要補充候選片段以外的內容。"
+        "請特別檢查問題中的所有核心概念是否都有片段支持，例如藥物類別、疾病階段、eGFR 門檻、禁忌或安全限制。"
+        "優先選擇 recommendation、treatment、selection、screening、diagnosis、table_row、含 eGFR/threshold/contraindication/avoid/dose 的片段。"
+        "若 CKD/eGFR/腎臟問題同時有 KDIGO 與 ADA 相關候選，請優先保留它們；若片段不足以完整回答，answerable 必須是 false。"
+        "只輸出 JSON，格式：{\"selected_ids\":[1,2,3],\"answerable\":true,\"coverage_gaps\":[\"...\"]}。"
+    )
+    prompt = (
+        f"使用者問題：{user_text}\n\n"
+        f"{knowledge_candidates_prompt(candidates)}\n\n"
+        f"請選出最多 {LINE_LLM_RERANK_TOP_K} 個最能回答問題的候選 id，並判斷 evidence coverage 是否足夠。"
+    )
+    try:
+        raw = call_gemini(
+            api_key,
+            system_text,
+            prompt,
+            max_output_tokens=420,
+            temperature=0.05,
+            timeout=min(GEMINI_TIMEOUT, 12),
+        )
+    except Exception as exc:
+        print(f"Gemini rerank failed: {type(exc).__name__}: {exc}")
+        return candidates[:LINE_LLM_RERANK_TOP_K], True, "Reranker failed; using local ranking."
+
+    data = extract_json_object(raw)
+    selected_ids = data.get("selected_ids")
+    if not isinstance(selected_ids, list):
+        selected_ids = []
+
+    selected: list[KnowledgeHit] = []
+    seen: set[int] = set()
+    for raw_id in selected_ids:
+        try:
+            candidate_index = int(raw_id) - 1
+        except (TypeError, ValueError):
+            continue
+        if 0 <= candidate_index < len(candidates) and candidate_index not in seen:
+            seen.add(candidate_index)
+            selected.append(candidates[candidate_index])
+        if len(selected) >= LINE_LLM_RERANK_TOP_K:
+            break
+
+    if not selected:
+        selected = candidates[:LINE_LLM_RERANK_TOP_K]
+
+    answerable_value = data.get("answerable")
+    if isinstance(answerable_value, bool):
+        answerable = answerable_value
+    elif answerable_value is None:
+        answerable = True
+    else:
+        answerable = str(answerable_value).strip().lower() not in {"false", "no", "0"}
+    gaps = data.get("coverage_gaps")
+    if isinstance(gaps, list):
+        coverage_gaps = "；".join(str(gap) for gap in gaps if str(gap).strip())
+    else:
+        coverage_gaps = str(gaps or "").strip()
+    return selected, answerable, coverage_gaps
+
+
 def build_evidence_review(api_key: str, user_text: str, knowledge_text: str) -> str:
     if not LINE_EVIDENCE_REVIEW_ENABLED or not api_key:
         return ""
@@ -659,7 +747,8 @@ def build_evidence_review(api_key: str, user_text: str, knowledge_text: str) -> 
         "請用繁體中文輸出精簡整理："
         "1. 可直接回答使用者問題的指南重點；"
         "2. 片段中明確的門檻、限制、藥物例外或安全提醒；"
-        "3. 片段不足或不能回答的地方。"
+        "3. 使用者問題中的每個核心概念是否都有片段支持；"
+        "4. 片段不足或不能回答的地方。"
         "最後一行必須寫 ANSWERABLE: yes 或 ANSWERABLE: no。"
     )
     prompt = f"使用者問題：{user_text}\n\n{knowledge_text}\n\n請先整理證據，不要寫給病友看的最終答案。"
@@ -685,6 +774,16 @@ def evidence_review_prompt(review: str) -> str:
         "以下整理只來自本輪指南片段，用來幫助最終回答完整且不漏重點；"
         "若它和原始指南片段衝突，必須以原始片段為準。\n"
         f"{review}"
+    )
+
+
+def rerank_coverage_prompt(coverage_gaps: str) -> str:
+    if not coverage_gaps:
+        return ""
+    return (
+        "\n\nReranker coverage check：\n"
+        "以下是檢索 reranker 對候選片段覆蓋度的判斷。若提到缺口，最終回答不可補完缺口，只能說明指南片段不足。\n"
+        f"{coverage_gaps}"
     )
 
 
@@ -744,10 +843,15 @@ def gemini_answer(user_text: str, line_user_id: str = "") -> str:
 
     recent_context = conversation_prompt(line_user_id)
     retrieval_query = build_retrieval_query(api_key, user_text, recent_context)
-    if not knowledge_answerable(retrieval_query):
+    candidates = search_knowledge_candidates(retrieval_query)
+    if not candidates:
         return knowledge_no_answer_text()
 
-    knowledge_text = knowledge_prompt(retrieval_query)
+    selected_hits, rerank_answerable, coverage_gaps = select_guideline_hits(api_key, user_text, candidates)
+    if not selected_hits or not rerank_answerable:
+        return knowledge_no_answer_text()
+
+    knowledge_text = knowledge_prompt_from_hits(selected_hits)
     evidence_review = build_evidence_review(api_key, user_text, knowledge_text)
     if evidence_review_says_unanswerable(evidence_review):
         return knowledge_no_answer_text()
@@ -756,6 +860,7 @@ def gemini_answer(user_text: str, line_user_id: str = "") -> str:
         + memory_prompt(line_user_id)
         + recent_context
         + knowledge_text
+        + rerank_coverage_prompt(coverage_gaps)
         + evidence_review_prompt(evidence_review)
     )
     try:
@@ -821,6 +926,11 @@ def health() -> dict[str, Any]:
             "guideline_query_planning": LINE_QUERY_PLANNING_ENABLED,
             "guideline_evidence_review": LINE_EVIDENCE_REVIEW_ENABLED,
             "multi_guideline_sources": True,
+            "source_aware_reranking": True,
+            "section_aware_retrieval": True,
+            "table_aware_retrieval": True,
+            "llm_reranker": LINE_LLM_RERANK_ENABLED,
+            "coverage_answerability_check": True,
             "ada_strict_grounding": True,
             "ada_query_planning": LINE_QUERY_PLANNING_ENABLED,
             "ada_evidence_review": LINE_EVIDENCE_REVIEW_ENABLED,

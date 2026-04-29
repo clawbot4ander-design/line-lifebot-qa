@@ -17,10 +17,12 @@ Obsidian/Google Drive archiving, image generation, and audio generation.
 LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
 GEMINI_API_KEY=...
-APP_VERSION=2026-04-30-multi-guideline-v5
+APP_VERSION=2026-04-30-medical-retrieval-v6
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
 GEMINI_TIMEOUT=20
 LINE_QUERY_PLANNING_ENABLED=1
+LINE_LLM_RERANK_ENABLED=1
+LINE_LLM_RERANK_TOP_K=5
 LINE_EVIDENCE_REVIEW_ENABLED=1
 LINE_RETRIEVAL_QUERY_MAX_CHARS=1400
 LINE_TIMEOUT=12
@@ -34,6 +36,8 @@ LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
 LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=/app/data/AACE 2026.md,/app/data/KDIGO-2026-Diabetes-and-CKD-Guideline-Update-Public-Review-Draft-March-2026.md
+LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
+LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
 LINE_KNOWLEDGE_MAX_SNIPPETS=5
 LINE_KNOWLEDGE_EXCERPT_CHARS=900
 ```
@@ -41,7 +45,7 @@ LINE_KNOWLEDGE_EXCERPT_CHARS=900
 Minimum variables to add or verify in Zeabur:
 
 ```bash
-APP_VERSION=2026-04-30-multi-guideline-v5
+APP_VERSION=2026-04-30-medical-retrieval-v6
 LINE_MEMORY_ENABLED=1
 LINE_CONTEXT_ENABLED=1
 LINE_SESSION_SCOPE=user
@@ -50,6 +54,7 @@ LINE_KNOWLEDGE_STRICT=1
 LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=/app/data/AACE 2026.md,/app/data/KDIGO-2026-Diabetes-and-CKD-Guideline-Update-Public-Review-Draft-March-2026.md
 LINE_QUERY_PLANNING_ENABLED=1
+LINE_LLM_RERANK_ENABLED=1
 LINE_EVIDENCE_REVIEW_ENABLED=1
 ```
 
@@ -82,6 +87,8 @@ LINE_KNOWLEDGE_STRICT=1
 LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=/app/data/AACE 2026.md,/app/data/KDIGO-2026-Diabetes-and-CKD-Guideline-Update-Public-Review-Draft-March-2026.md
 LINE_KNOWLEDGE_CHUNK_CHARS=1800
+LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
+LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
 LINE_KNOWLEDGE_MAX_SNIPPETS=5
 LINE_KNOWLEDGE_EXCERPT_CHARS=900
 ```
@@ -143,18 +150,28 @@ Default behavior:
 
 ```bash
 LINE_QUERY_PLANNING_ENABLED=1
+LINE_LLM_RERANK_ENABLED=1
+LINE_LLM_RERANK_TOP_K=5
 LINE_EVIDENCE_REVIEW_ENABLED=1
 LINE_RETRIEVAL_QUERY_MAX_CHARS=1400
+LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
+LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
 ```
 
 Per message, the flow is:
 
 1. Use the current question plus short-term LINE context to create a guideline
    search query with likely English terms, abbreviations, and section words.
-2. Search the mounted ADA, AACE, KDIGO, or other configured Markdown files.
-3. Ask Gemini to organize only the retrieved guideline snippets into an evidence
-   review, including source names.
-4. Generate the final Traditional Chinese LINE answer from the guideline
+2. Search the mounted ADA, AACE, KDIGO, or other configured Markdown files with
+   source-aware and section-aware scoring.
+3. Split table rows into separate retrievable snippets so medication tables,
+   eGFR thresholds, contraindications, and dosing/use considerations can rank
+   independently.
+4. Retrieve a candidate pool, then ask Gemini to rerank only those candidates
+   and decide whether the snippets cover all core concepts in the question.
+5. Ask Gemini to organize only the selected guideline snippets into an evidence
+   review, including source names and coverage gaps.
+6. Generate the final Traditional Chinese LINE answer from the guideline
    snippets and evidence review.
 
 The final answer prompt still forbids Gemini from using its built-in medical
@@ -250,7 +267,7 @@ The health check should include:
 
 ```json
 {
-  "app_version": "2026-04-30-multi-guideline-v5",
+  "app_version": "2026-04-30-medical-retrieval-v6",
   "features": {
     "english_name_memory": true,
     "trailing_question_removal": true,
@@ -259,6 +276,11 @@ The health check should include:
     "guideline_query_planning": true,
     "guideline_evidence_review": true,
     "multi_guideline_sources": true,
+    "source_aware_reranking": true,
+    "section_aware_retrieval": true,
+    "table_aware_retrieval": true,
+    "llm_reranker": true,
+    "coverage_answerability_check": true,
     "ada_strict_grounding": true,
     "ada_query_planning": true,
     "ada_evidence_review": true

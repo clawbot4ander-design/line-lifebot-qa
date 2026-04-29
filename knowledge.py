@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import html
 from pathlib import Path
 import math
 import os
@@ -60,6 +61,7 @@ class KnowledgeChunk:
     source_label: str
     title: str
     section: str
+    chunk_type: str
     text: str
     tokens: tuple[str, ...]
 
@@ -70,6 +72,7 @@ class KnowledgeHit:
     source_label: str
     title: str
     section: str
+    chunk_type: str
     excerpt: str
     score: float
 
@@ -142,6 +145,7 @@ class KnowledgeBase:
                             source_label,
                             title,
                             section or title,
+                            "text",
                             chunk_text,
                             tuple(tokenize(chunk_text)),
                         )
@@ -153,8 +157,17 @@ class KnowledgeBase:
             if buffer:
                 chunk_text = "\n".join(buffer)
                 chunks.append(
-                    KnowledgeChunk(path.name, source_label, title, section or title, chunk_text, tuple(tokenize(chunk_text)))
+                    KnowledgeChunk(
+                        path.name,
+                        source_label,
+                        title,
+                        section or title,
+                        "text",
+                        chunk_text,
+                        tuple(tokenize(chunk_text)),
+                    )
                 )
+            chunks.extend(table_chunks_from_lines(path.name, source_label, title, section or title, lines))
         return chunks
 
     def search(self, query: str, limit: int = 3, excerpt_chars: int = 520) -> list[KnowledgeHit]:
@@ -183,6 +196,7 @@ class KnowledgeBase:
                     source_label=chunk.source_label,
                     title=chunk.title,
                     section=chunk.section,
+                    chunk_type=chunk.chunk_type,
                     excerpt=best_excerpt(chunk.text, query_tokens, excerpt_chars),
                     score=score,
                 )
@@ -273,6 +287,86 @@ def public_metadata(value: str) -> str:
     return value.strip(" -_")
 
 
+def table_chunks_from_lines(
+    source: str,
+    source_label: str,
+    title: str,
+    section: str,
+    lines: list[str],
+) -> list[KnowledgeChunk]:
+    chunks: list[KnowledgeChunk] = []
+    table_label = ""
+    row_buffer: list[str] = []
+    in_html_row = False
+
+    for line in lines:
+        label_match = re.search(r"\b(Table\s+\d+(?:\.\d+)?[^<\n]*)", line, flags=re.I)
+        if label_match:
+            table_label = clean_cell_text(label_match.group(1))[:160]
+
+        lowered = line.lower()
+        rows: list[list[str]] = []
+        if "<tr" in lowered:
+            in_html_row = True
+            row_buffer = [line]
+        elif in_html_row:
+            row_buffer.append(line)
+
+        if in_html_row and "</tr>" in lowered:
+            rows = table_rows_from_html(" ".join(row_buffer))
+            in_html_row = False
+            row_buffer = []
+        elif not in_html_row:
+            rows = markdown_table_rows_from_line(line)
+
+        for cells in rows:
+            if len(cells) < 2:
+                continue
+            row_text = " | ".join(cells)
+            if not row_text or re.fullmatch(r"[-:| ]+", row_text):
+                continue
+            prefix = f"{table_label}: " if table_label else "Table row: "
+            chunk_text = prefix + row_text
+            chunks.append(
+                KnowledgeChunk(
+                    source,
+                    source_label,
+                    title,
+                    section,
+                    "table_row",
+                    chunk_text,
+                    tuple(tokenize(chunk_text)),
+                )
+            )
+    return chunks
+
+
+def table_rows_from_html(value: str) -> list[list[str]]:
+    rows: list[list[str]] = []
+    row_matches = re.findall(r"<tr[^>]*>(.*?)</tr>", value, flags=re.I | re.S)
+    for row in row_matches or [value]:
+        cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row, flags=re.I | re.S)
+        cleaned = [clean_cell_text(cell) for cell in cells if clean_cell_text(cell)]
+        if cleaned:
+            rows.append(cleaned)
+    return rows
+
+
+def markdown_table_rows_from_line(line: str) -> list[list[str]]:
+    stripped = line.strip()
+    if "|" not in stripped or re.fullmatch(r"\|?\s*[-:| ]+\s*\|?", stripped):
+        return []
+    cells = [clean_cell_text(cell) for cell in stripped.strip("|").split("|")]
+    return [[cell for cell in cells if cell]]
+
+
+def clean_cell_text(value: str) -> str:
+    value = re.sub(r"<[^>]+>", " ", value)
+    value = html.unescape(value)
+    value = re.sub(r"\s+", " ", value)
+    return value.strip(" •\t\r\n")
+
+
 def load_knowledge_base() -> KnowledgeBase | None:
     if not knowledge_enabled():
         return None
@@ -306,6 +400,15 @@ def search_knowledge(query: str) -> list[KnowledgeHit]:
     return kb.search(query, limit=limit, excerpt_chars=excerpt_chars)
 
 
+def search_knowledge_candidates(query: str) -> list[KnowledgeHit]:
+    kb = load_knowledge_base()
+    if not kb:
+        return []
+    limit = int(os.getenv("LINE_KNOWLEDGE_CANDIDATE_SNIPPETS", "15"))
+    excerpt_chars = int(os.getenv("LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS", "700"))
+    return kb.search(query, limit=limit, excerpt_chars=excerpt_chars)
+
+
 def knowledge_no_answer_text() -> str:
     return (
         "目前我在已載入的糖尿病指南知識庫中，找不到足夠直接的依據回答這個問題。"
@@ -317,11 +420,14 @@ def knowledge_no_answer_text() -> str:
 def knowledge_answerable(query: str) -> bool:
     if not knowledge_strict_enabled():
         return True
-    return bool(search_knowledge(query))
+    return bool(search_knowledge_candidates(query))
 
 
 def knowledge_prompt(query: str) -> str:
-    hits = search_knowledge(query)
+    return knowledge_prompt_from_hits(search_knowledge(query))
+
+
+def knowledge_prompt_from_hits(hits: list[KnowledgeHit]) -> str:
     if not hits:
         if knowledge_strict_enabled():
             return (
@@ -347,6 +453,27 @@ def knowledge_prompt(query: str) -> str:
                 f"\n[{index}] {public_metadata(hit.title)}",
                 f"來源指南：{hit.source_label}",
                 f"章節：{public_metadata(hit.section)}",
+                f"片段類型：{hit.chunk_type}",
+                f"片段：{hit.excerpt}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def knowledge_candidates_prompt(hits: list[KnowledgeHit]) -> str:
+    if not hits:
+        return "\n\n候選指南片段：無。"
+    lines = [
+        "\n\n候選指南片段：以下為初步召回的候選片段，請只用來做 rerank/coverage，不可用模型內建知識補充。",
+    ]
+    for index, hit in enumerate(hits, start=1):
+        lines.extend(
+            [
+                f"\n[{index}] {public_metadata(hit.title)}",
+                f"來源指南：{hit.source_label}",
+                f"章節：{public_metadata(hit.section)}",
+                f"片段類型：{hit.chunk_type}",
+                f"召回分數：{hit.score:.2f}",
                 f"片段：{hit.excerpt}",
             ]
         )
@@ -468,8 +595,18 @@ def best_sentence_excerpt(text: str, query_tokens: list[str], max_chars: int) ->
 
 
 def domain_adjustment(query: str, chunk: KnowledgeChunk) -> float:
-    haystack = f"{chunk.source} {chunk.title} {chunk.section}".lower()
+    haystack = f"{chunk.source} {chunk.source_label} {chunk.title} {chunk.section} {chunk.text[:700]}".lower()
+    query_lower = query.lower()
     adjustment = 1.0
+
+    if chunk.chunk_type == "table_row":
+        adjustment *= 1.25
+    if re.search(r"\b(reference|references|acknowledg|appendix)\b", haystack):
+        adjustment *= 0.35
+    if re.search(r"\b(recommendation|recommendations|treatment|therapy|selection|screening|diagnosis|pharmacologic|management|interventions)\b", haystack):
+        adjustment *= 1.18
+    if re.search(r"\b(egfr|albuminuria|uacr|mg/g|ml/min|contraindicat|avoid|dose|dosage|adjust|threshold|initiat|discontinu)\b", haystack):
+        adjustment *= 1.18
 
     if "住院" not in query and "hospital" in haystack:
         adjustment *= 0.55
@@ -489,22 +626,31 @@ def domain_adjustment(query: str, chunk: KnowledgeChunk) -> float:
         or "nutrition therapy" in haystack
     ):
         adjustment *= 1.6
-    if ("腎" in query or "尿蛋白" in query) and ("dc26s011" in haystack or "kidney" in haystack):
+    if ("腎" in query or "尿蛋白" in query or "ckd" in query_lower or "egfr" in query_lower) and (
+        "kdigo" in haystack or "dc26s011" in haystack or "kidney" in haystack or "chronic kidney disease" in haystack
+    ):
         adjustment *= 1.5
-    if ("腎" in query or "egfr" in query.lower() or "腎絲球" in query or "腎衰竭" in query) and (
+    if ("腎" in query or "egfr" in query_lower or "腎絲球" in query or "腎衰竭" in query) and (
         "dc26s009" in haystack
         or "dc26s011" in haystack
+        or "kdigo" in haystack
         or "chronic kidney disease" in haystack
         or "glucose-lowering therapy for people with chronic kidney disease" in haystack
     ):
         adjustment *= 1.45
-    if "glp" in query.lower() and (
+    if "glp" in query_lower and (
         "dc26s009" in haystack
         or "dc26s011" in haystack
+        or "aace" in haystack
+        or "kdigo" in haystack
         or "glp-1" in haystack
         or "glucose-lowering therapy" in haystack
     ):
         adjustment *= 1.6
+    if ("藥" in query or "medication" in query_lower or "pharmacologic" in query_lower) and (
+        "aace" in haystack or "dc26s009" in haystack or "pharmacologic" in haystack
+    ):
+        adjustment *= 1.25
     if ("眼" in query or "視網膜" in query) and ("retinopathy" in haystack or "dc26s012" in haystack):
         adjustment *= 1.4
     if ("腳" in query or "足" in query) and ("foot" in haystack or "neuropathy" in haystack):
