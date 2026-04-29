@@ -18,7 +18,21 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
-from knowledge import knowledge_prompt, knowledge_status
+try:
+    from knowledge import knowledge_prompt, knowledge_status
+except ModuleNotFoundError:
+    def knowledge_prompt(query: str) -> str:
+        return (
+            "\n\n背景知識檢索：目前部署環境沒有載入 knowledge.py，"
+            "請只給一般糖尿病衛教原則，不要假裝查到 ADA guideline 片段。"
+        )
+
+    def knowledge_status() -> dict[str, object]:
+        return {
+            "enabled": False,
+            "available": False,
+            "error": "knowledge.py not found in deployment",
+        }
 
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
