@@ -12,10 +12,7 @@ from typing import Iterable
 
 
 DEFAULT_KNOWLEDGE_DIR = os.getenv("LINE_KNOWLEDGE_DIR", "/app/data/adaguidelines")
-DEFAULT_EXTRA_KNOWLEDGE_PATHS = (
-    "/app/data/AACE 2026.md,"
-    "/app/data/KDIGO-2026-Diabetes-and-CKD-Guideline-Update-Public-Review-Draft-March-2026.md"
-)
+DEFAULT_EXTRA_KNOWLEDGE_PATHS = ""
 
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9+-]*|\d+(?:\.\d+)?|[\u4e00-\u9fff]{1,4}")
 HEADING_RE = re.compile(r"^#{1,4}\s+(.+)$")
@@ -452,6 +449,7 @@ def knowledge_source_files(root: Path, extra_paths: list[Path]) -> list[Path]:
     if root.exists():
         files.extend(sorted(path for path in root.glob("*.md") if path.is_file()))
     files.extend(path for path in extra_paths if path.exists() and path.is_file())
+    files = [path for path in files if is_ada_guideline_file(path)]
 
     deduped: list[Path] = []
     seen: set[str] = set()
@@ -461,6 +459,11 @@ def knowledge_source_files(root: Path, extra_paths: list[Path]) -> list[Path]:
             seen.add(key)
             deduped.append(path)
     return deduped
+
+
+def is_ada_guideline_file(path: Path) -> bool:
+    lower = path.name.lower()
+    return "ada" in lower or bool(re.search(r"dc26s\d+", lower))
 
 
 def guideline_source_label(source_name: str) -> str:
@@ -636,11 +639,11 @@ def knowledge_prompt_from_hits(hits: list[KnowledgeHit]) -> str:
         )
 
     lines = [
-        "\n\n背景知識檢索：以下為本次問題相關的糖尿病指南片段，可能包含 ADA、AACE 或 KDIGO 等來源。",
+        "\n\n背景知識檢索：以下為本次問題相關的 ADA 糖尿病指南片段。",
         "嚴格回答規則：只能根據以下片段回答；不要使用模型內建知識、一般醫學常識或推測補完。",
         "若以下片段不足以直接回答使用者問題，請明確說指南片段不足，並停止回答，不要改用其他來源補充。",
         "回答方式：先用 1 句話直接回答，再用 2 到 4 個重點整理指南片段支持的內容；若有藥物限制或 eGFR 門檻，請清楚列出，但不要提供個人化劑量。",
-        "來源標示：回答中請自然標示依據來源，例如「根據 ADA 2026 片段」、「根據 KDIGO 2026 片段」或「根據 AACE 2026 片段」；不要使用 draft 或 public review draft 字樣。",
+        "來源標示：回答中請自然標示依據來源，例如「根據 ADA 2026 片段」；不要編造未出現在片段中的來源。",
     ]
     for index, hit in enumerate(hits, start=1):
         lines.extend(

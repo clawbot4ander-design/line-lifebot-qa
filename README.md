@@ -16,7 +16,7 @@ Obsidian/Google Drive archiving, image generation, and audio generation.
 ```bash
 LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
-APP_VERSION=2026-04-30-clinical-intent-v12
+APP_VERSION=2026-04-30-ada-only-v13
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -36,7 +36,7 @@ DATABASE_URL=postgresql://...
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
 LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
-LINE_KNOWLEDGE_EXTRA_PATHS=/app/data/AACE 2026.md,/app/data/KDIGO-2026-Diabetes-and-CKD-Guideline-Update-Public-Review-Draft-March-2026.md
+LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
 LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
 LINE_KNOWLEDGE_MAX_SNIPPETS=5
@@ -46,7 +46,7 @@ LINE_KNOWLEDGE_EXCERPT_CHARS=900
 Minimum variables to add or verify in Zeabur:
 
 ```bash
-APP_VERSION=2026-04-30-clinical-intent-v12
+APP_VERSION=2026-04-30-ada-only-v13
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -56,7 +56,7 @@ LINE_SESSION_SCOPE=user
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
 LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
-LINE_KNOWLEDGE_EXTRA_PATHS=/app/data/AACE 2026.md,/app/data/KDIGO-2026-Diabetes-and-CKD-Guideline-Update-Public-Review-Draft-March-2026.md
+LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_QUERY_PLANNING_ENABLED=1
 LINE_LLM_RERANK_ENABLED=1
 LINE_EVIDENCE_REVIEW_ENABLED=1
@@ -71,8 +71,8 @@ available as an optional provider by setting `LLM_PROVIDER=deepseek`,
 
 ## Background Knowledge
 
-The webhook loads diabetes guideline Markdown files from `LINE_KNOWLEDGE_DIR`
-plus optional files listed in `LINE_KNOWLEDGE_EXTRA_PATHS`, then performs local
+The webhook loads ADA diabetes guideline Markdown files from `LINE_KNOWLEDGE_DIR`
+and ignores extra guideline files when `LINE_KNOWLEDGE_EXTRA_PATHS=0`, then performs local
 file-based retrieval before each LLM answer. This is meant for LINE DM
 patient-education grounding, not for long-term user memory.
 
@@ -80,8 +80,6 @@ Default source inside Zeabur/container:
 
 ```text
 /app/data/adaguidelines
-/app/data/AACE 2026.md
-/app/data/KDIGO-2026-Diabetes-and-CKD-Guideline-Update-Public-Review-Draft-March-2026.md
 ```
 
 Useful settings:
@@ -90,7 +88,7 @@ Useful settings:
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
 LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
-LINE_KNOWLEDGE_EXTRA_PATHS=/app/data/AACE 2026.md,/app/data/KDIGO-2026-Diabetes-and-CKD-Guideline-Update-Public-Review-Draft-March-2026.md
+LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_KNOWLEDGE_CHUNK_CHARS=1800
 LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
 LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
@@ -111,14 +109,13 @@ have permission to redistribute them. Recommended deployment:
 1. In Zeabur, create or attach a Volume for this service.
 2. Mount it at `/app/data`.
 3. Put the ADA Markdown files under `/app/data/adaguidelines`.
-4. Put extra guideline files such as AACE or KDIGO directly under `/app/data`.
-5. Set:
+4. Set:
 
 ```bash
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
 LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
-LINE_KNOWLEDGE_EXTRA_PATHS=/app/data/AACE 2026.md,/app/data/KDIGO-2026-Diabetes-and-CKD-Guideline-Update-Public-Review-Draft-March-2026.md
+LINE_KNOWLEDGE_EXTRA_PATHS=0
 ```
 
 After redeploy, `GET /` should show:
@@ -127,13 +124,11 @@ After redeploy, `GET /` should show:
 "knowledge": {
   "enabled": true,
   "available": true,
-  "files": 19,
+  "files": 17,
   "dir_files": 17,
-  "extra_files": 2,
+  "extra_files": 0,
   "sources": [
-    "AACE 2026",
-    "ADA Standards of Care in Diabetes 2026",
-    "KDIGO 2026 Diabetes and CKD Guideline Update"
+    "ADA Standards of Care in Diabetes 2026"
   ]
 }
 ```
@@ -170,7 +165,7 @@ Per message, the flow is:
    must-retrieve topics, and answer strategy.
 2. Use that clinical intent JSON to create a guideline search query with likely
    English terms, abbreviations, section words, and evidence targets.
-3. Search the mounted ADA, AACE, KDIGO, or other configured Markdown files with
+3. Search the mounted ADA Markdown files with
    multi-query retrieval, source-aware scoring, section-aware scoring, and
    indexed metadata such as source, title, section, and table row type.
 4. Split table rows into separate retrievable snippets so medication tables,
@@ -283,7 +278,7 @@ The health check should include:
 
 ```json
 {
-  "app_version": "2026-04-30-clinical-intent-v12",
+  "app_version": "2026-04-30-ada-only-v13",
   "llm_provider": "gemini",
   "model": "gemini-3.1-flash-lite-preview",
   "features": {
@@ -294,7 +289,8 @@ The health check should include:
     "guideline_query_planning": true,
     "clinical_intent_planning": true,
     "guideline_evidence_review": true,
-    "multi_guideline_sources": true,
+    "ada_only_sources": true,
+    "multi_guideline_sources": false,
     "source_aware_reranking": true,
     "section_aware_retrieval": true,
     "table_aware_retrieval": true,
