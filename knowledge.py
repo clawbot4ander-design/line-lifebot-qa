@@ -25,6 +25,13 @@ QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "藥": ("pharmacologic", "medication", "insulin", "metformin", "GLP-1", "SGLT2"),
     "胰島素": ("insulin", "hypoglycemia", "injection"),
     "腎": ("kidney", "CKD", "albuminuria", "eGFR", "renal"),
+    "腎絲球": ("eGFR", "estimated glomerular filtration rate", "GFR", "kidney function"),
+    "過濾率": ("eGFR", "estimated glomerular filtration rate", "GFR", "kidney function"),
+    "腎病變": ("CKD", "chronic kidney disease", "kidney outcomes", "albuminuria", "eGFR"),
+    "腎衰竭": ("kidney failure", "advanced CKD", "stage G5", "dialysis", "eGFR"),
+    "洗腎": ("dialysis", "kidney failure", "stage G5"),
+    "透析": ("dialysis", "kidney failure", "stage G5"),
+    "GLP": ("GLP-1", "GLP-1 RA", "glucagon-like peptide 1 receptor agonist", "semaglutide"),
     "眼": ("retinopathy", "eye", "ophthalmologist", "retinal"),
     "腳": ("foot", "neuropathy", "ulcer", "podiatrist"),
     "心臟": ("cardiovascular", "heart", "ASCVD", "blood pressure", "lipid"),
@@ -227,6 +234,9 @@ def search_knowledge(query: str) -> list[KnowledgeHit]:
         return []
     limit = int(os.getenv("LINE_KNOWLEDGE_MAX_SNIPPETS", "3"))
     excerpt_chars = int(os.getenv("LINE_KNOWLEDGE_EXCERPT_CHARS", "520"))
+    if knowledge_strict_enabled():
+        limit = max(limit, int(os.getenv("LINE_KNOWLEDGE_STRICT_MIN_SNIPPETS", "5")))
+        excerpt_chars = max(excerpt_chars, int(os.getenv("LINE_KNOWLEDGE_STRICT_EXCERPT_CHARS", "900")))
     return kb.search(query, limit=limit, excerpt_chars=excerpt_chars)
 
 
@@ -262,6 +272,7 @@ def knowledge_prompt(query: str) -> str:
         "\n\n背景知識檢索：以下為本次問題相關的 ADA Standards of Care in Diabetes 2026 片段。",
         "嚴格回答規則：只能根據以下片段回答；不要使用模型內建知識、一般醫學常識或推測補完。",
         "若以下片段不足以直接回答使用者問題，請明確說 ADA 片段不足，並停止回答，不要改用其他來源補充。",
+        "回答方式：先用 1 句話直接回答，再用 2 到 4 個重點整理 ADA 片段支持的內容；若有藥物限制或 eGFR 門檻，請清楚列出，但不要提供個人化劑量。",
     ]
     for index, hit in enumerate(hits, start=1):
         lines.extend(
@@ -318,6 +329,10 @@ def best_excerpt(text: str, query_tokens: list[str], max_chars: int) -> str:
     if len(compact) <= max_chars:
         return compact
 
+    sentence_excerpt = best_sentence_excerpt(compact, query_tokens, max_chars)
+    if sentence_excerpt:
+        return sentence_excerpt
+
     lowered = compact.lower()
     positions = [lowered.find(token.lower()) for token in query_tokens if lowered.find(token.lower()) >= 0]
     center = min(positions) if positions else 0
@@ -328,6 +343,53 @@ def best_excerpt(text: str, query_tokens: list[str], max_chars: int) -> str:
     if start > 0:
         excerpt = "..." + excerpt
     if end < len(compact):
+        excerpt += "..."
+    return excerpt
+
+
+def best_sentence_excerpt(text: str, query_tokens: list[str], max_chars: int) -> str:
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?。！？])\s+", text) if part.strip()]
+    if len(sentences) < 2:
+        return ""
+
+    lowered_tokens = [token.lower() for token in query_tokens]
+    best_score = 0
+    best_index = -1
+    for index, sentence in enumerate(sentences):
+        lowered = sentence.lower()
+        score = sum(1 for token in lowered_tokens if token and token in lowered)
+        if "glp-1" in lowered and any(token in lowered_tokens for token in ["egfr", "ckd", "kidney", "renal"]):
+            score += 4
+        elif "glp-1" in lowered:
+            score += 2
+        if score > best_score:
+            best_score = score
+            best_index = index
+
+    if best_index < 0 or best_score == 0:
+        return ""
+
+    selected = [sentences[best_index]]
+    left = best_index - 1
+    right = best_index + 1
+    while len(" ".join(selected)) < max_chars and (left >= 0 or right < len(sentences)):
+        if left >= 0:
+            candidate = sentences[left]
+            if len(" ".join([candidate, *selected])) <= max_chars:
+                selected.insert(0, candidate)
+            left -= 1
+        if len(" ".join(selected)) >= max_chars:
+            break
+        if right < len(sentences):
+            candidate = sentences[right]
+            if len(" ".join([*selected, candidate])) <= max_chars:
+                selected.append(candidate)
+            right += 1
+
+    excerpt = " ".join(selected).strip()
+    if left >= 0:
+        excerpt = "..." + excerpt
+    if right < len(sentences):
         excerpt += "..."
     return excerpt
 
@@ -356,6 +418,20 @@ def domain_adjustment(query: str, chunk: KnowledgeChunk) -> float:
         adjustment *= 1.6
     if ("腎" in query or "尿蛋白" in query) and ("dc26s011" in haystack or "kidney" in haystack):
         adjustment *= 1.5
+    if ("腎" in query or "egfr" in query.lower() or "腎絲球" in query or "腎衰竭" in query) and (
+        "dc26s009" in haystack
+        or "dc26s011" in haystack
+        or "chronic kidney disease" in haystack
+        or "glucose-lowering therapy for people with chronic kidney disease" in haystack
+    ):
+        adjustment *= 1.45
+    if "glp" in query.lower() and (
+        "dc26s009" in haystack
+        or "dc26s011" in haystack
+        or "glp-1" in haystack
+        or "glucose-lowering therapy" in haystack
+    ):
+        adjustment *= 1.6
     if ("眼" in query or "視網膜" in query) and ("retinopathy" in haystack or "dc26s012" in haystack):
         adjustment *= 1.4
     if ("腳" in query or "足" in query) and ("foot" in haystack or "neuropathy" in haystack):

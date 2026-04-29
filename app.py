@@ -45,9 +45,22 @@ except ModuleNotFoundError:
 
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-APP_VERSION = os.getenv("APP_VERSION", "2026-04-30-ada-strict-v3")
+APP_VERSION = os.getenv("APP_VERSION", "2026-04-30-ada-reasoning-v4")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "20"))
+LINE_QUERY_PLANNING_ENABLED = os.getenv("LINE_QUERY_PLANNING_ENABLED", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+LINE_EVIDENCE_REVIEW_ENABLED = os.getenv("LINE_EVIDENCE_REVIEW_ENABLED", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+LINE_RETRIEVAL_QUERY_MAX_CHARS = int(os.getenv("LINE_RETRIEVAL_QUERY_MAX_CHARS", "1400"))
 LINE_TIMEOUT = int(os.getenv("LINE_TIMEOUT", "12"))
 LINE_MEMORY_ENABLED = os.getenv("LINE_MEMORY_ENABLED", "1").strip() != "0"
 LINE_MEMORY_DB = os.getenv("LINE_MEMORY_DB", "/tmp/line_lifebot_memory.sqlite3")
@@ -556,6 +569,128 @@ def extract_gemini_text(payload: dict[str, Any]) -> str:
     return "\n".join(parts).strip()
 
 
+def call_gemini(
+    api_key: str,
+    system_text: str,
+    user_text: str,
+    max_output_tokens: int = 650,
+    temperature: float = 0.4,
+    timeout: int | None = None,
+) -> str:
+    body = {
+        "system_instruction": {"parts": [{"text": system_text}]},
+        "contents": [{"role": "user", "parts": [{"text": user_text}]}],
+        "generationConfig": {
+            "maxOutputTokens": max_output_tokens,
+            "temperature": temperature,
+        },
+    }
+    target_url = f"{GEMINI_API_BASE}/{GEMINI_MODEL}:generateContent"
+    request = urllib.request.Request(
+        target_url,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout or GEMINI_TIMEOUT) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    return extract_gemini_text(payload)
+
+
+def extract_json_object(text: str) -> dict[str, Any]:
+    match = re.search(r"\{.*\}", text, flags=re.S)
+    if not match:
+        return {}
+    try:
+        value = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def build_retrieval_query(api_key: str, user_text: str, recent_context: str) -> str:
+    if not LINE_QUERY_PLANNING_ENABLED or not api_key:
+        return user_text
+
+    system_text = (
+        "你不是回答者，也不要提供醫療建議。"
+        "你的唯一任務是把 LINE 病友問題轉成 ADA Standards of Care in Diabetes 2026 文件檢索查詢。"
+        "請根據本次問題與最近對話脈絡，補上可能出現在 ADA 文件中的英文術語、縮寫、同義詞與章節詞。"
+        "不要新增使用者沒有問到的病情、診斷、用藥劑量或結論。"
+        "只輸出 JSON，格式為：{\"search_query\":\"...\",\"keywords\":[\"...\"]}。"
+    )
+    prompt = (
+        f"本次問題：{user_text}\n\n"
+        f"{recent_context or '最近對話脈絡：無'}\n\n"
+        "請產生適合全文檢索 ADA 指引 Markdown 的查詢。"
+    )
+    try:
+        raw = call_gemini(
+            api_key,
+            system_text,
+            prompt,
+            max_output_tokens=260,
+            temperature=0.1,
+            timeout=min(GEMINI_TIMEOUT, 10),
+        )
+    except Exception as exc:
+        print(f"Gemini query planning failed: {type(exc).__name__}: {exc}")
+        return user_text
+
+    data = extract_json_object(raw)
+    search_query = str(data.get("search_query") or "").strip()
+    keywords = data.get("keywords") if isinstance(data.get("keywords"), list) else []
+    keyword_text = " ".join(str(keyword).strip() for keyword in keywords if str(keyword).strip())
+    combined = " ".join(part for part in [user_text, search_query, keyword_text] if part).strip()
+    return combined[:LINE_RETRIEVAL_QUERY_MAX_CHARS] or user_text
+
+
+def build_evidence_review(api_key: str, user_text: str, knowledge_text: str) -> str:
+    if not LINE_EVIDENCE_REVIEW_ENABLED or not api_key:
+        return ""
+
+    system_text = (
+        "你是 ADA Standards of Care in Diabetes 2026 的證據整理助手，不是最終回答者。"
+        "只能根據提供的 ADA 片段整理，不可使用模型內建知識、其他指南、新聞或推測補完。"
+        "請用繁體中文輸出精簡整理："
+        "1. 可直接回答使用者問題的 ADA 重點；"
+        "2. 片段中明確的門檻、限制、藥物例外或安全提醒；"
+        "3. 片段不足或不能回答的地方。"
+        "最後一行必須寫 ANSWERABLE: yes 或 ANSWERABLE: no。"
+    )
+    prompt = f"使用者問題：{user_text}\n\n{knowledge_text}\n\n請先整理證據，不要寫給病友看的最終答案。"
+    try:
+        return call_gemini(
+            api_key,
+            system_text,
+            prompt,
+            max_output_tokens=520,
+            temperature=0.1,
+            timeout=min(GEMINI_TIMEOUT, 12),
+        ).strip()
+    except Exception as exc:
+        print(f"Gemini evidence review failed: {type(exc).__name__}: {exc}")
+        return ""
+
+
+def evidence_review_prompt(review: str) -> str:
+    if not review:
+        return ""
+    return (
+        "\n\n檢索後證據整理：\n"
+        "以下整理只來自本輪 ADA 片段，用來幫助最終回答完整且不漏重點；"
+        "若它和原始 ADA 片段衝突，必須以原始片段為準。\n"
+        f"{review}"
+    )
+
+
+def evidence_review_says_unanswerable(review: str) -> bool:
+    return bool(re.search(r"ANSWERABLE\s*:\s*no\b", review, flags=re.I))
+
+
 def remove_trailing_question(text: str) -> str:
     paragraphs = [part.strip() for part in re.split(r"\n{2,}", text.strip()) if part.strip()]
     if not paragraphs:
@@ -602,49 +737,35 @@ def remove_trailing_question(text: str) -> str:
 
 
 def gemini_answer(user_text: str, line_user_id: str = "") -> str:
-    if not knowledge_answerable(user_text):
-        return knowledge_no_answer_text()
-
     api_key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
     if not api_key:
         return "目前快速問答服務尚未設定 Gemini API key。若你有血糖不舒服、低血糖症狀或血糖持續很高，請先聯絡醫療團隊。"
 
-    body = {
-        "system_instruction": {
-            "parts": [
-                {
-                    "text": SYSTEM_PROMPT
-                    + memory_prompt(line_user_id)
-                    + conversation_prompt(line_user_id)
-                    + knowledge_prompt(user_text)
-                }
-            ]
-        },
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": f"病友問題：{user_text}"}],
-            }
-        ],
-        "generationConfig": {
-            "maxOutputTokens": 650,
-            "temperature": 0.4,
-        },
-    }
-    target_url = f"{GEMINI_API_BASE}/{GEMINI_MODEL}:generateContent"
-    request = urllib.request.Request(
-        target_url,
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "x-goog-api-key": api_key,
-            "Content-Type": "application/json",
-        },
-        method="POST",
+    recent_context = conversation_prompt(line_user_id)
+    retrieval_query = build_retrieval_query(api_key, user_text, recent_context)
+    if not knowledge_answerable(retrieval_query):
+        return knowledge_no_answer_text()
+
+    knowledge_text = knowledge_prompt(retrieval_query)
+    evidence_review = build_evidence_review(api_key, user_text, knowledge_text)
+    if evidence_review_says_unanswerable(evidence_review):
+        return knowledge_no_answer_text()
+    system_text = (
+        SYSTEM_PROMPT
+        + memory_prompt(line_user_id)
+        + recent_context
+        + knowledge_text
+        + evidence_review_prompt(evidence_review)
     )
     try:
-        with urllib.request.urlopen(request, timeout=GEMINI_TIMEOUT) as response:
-            payload = json.loads(response.read().decode("utf-8", errors="replace"))
-        answer = extract_gemini_text(payload)
+        answer = call_gemini(
+            api_key,
+            system_text,
+            f"病友問題：{user_text}\n\n請先完整檢視本輪 ADA 片段與證據整理，再用繁體中文回答。不要提出追問。",
+            max_output_tokens=820,
+            temperature=0.35,
+            timeout=GEMINI_TIMEOUT,
+        )
         if answer:
             return remove_trailing_question(answer)[:4900]
         return "目前系統暫時沒有產生完整回覆。若你有明顯不舒服或血糖異常，請先聯絡醫療團隊。"
@@ -696,6 +817,8 @@ def health() -> dict[str, Any]:
             "short_term_context": LINE_CONTEXT_ENABLED,
             "session_scoped_context": True,
             "ada_strict_grounding": True,
+            "ada_query_planning": LINE_QUERY_PLANNING_ENABLED,
+            "ada_evidence_review": LINE_EVIDENCE_REVIEW_ENABLED,
         },
         "context_enabled": LINE_CONTEXT_ENABLED,
         "context_max_messages": LINE_CONTEXT_MAX_MESSAGES,
