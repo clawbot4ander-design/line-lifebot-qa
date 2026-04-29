@@ -2,8 +2,8 @@
 
 Fast Zeabur webhook for ordinary diabetes patient-education questions.
 
-This service answers LINE text messages directly with Gemini API and does not start
-Hermes Agent. Keep Hermes Agent for scheduled diabetes news, academic search,
+This service answers LINE text messages directly with a configured LLM provider
+(Gemini or DeepSeek) and does not start Hermes Agent. Keep Hermes Agent for scheduled diabetes news, academic search,
 Obsidian/Google Drive archiving, image generation, and audio generation.
 
 ## Endpoints
@@ -16,8 +16,13 @@ Obsidian/Google Drive archiving, image generation, and audio generation.
 ```bash
 LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
+APP_VERSION=2026-04-30-deepseek-provider-v10
+LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=...
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_THINKING_ENABLED=1
+DEEPSEEK_REASONING_EFFORT=high
 GEMINI_API_KEY=...
-APP_VERSION=2026-04-30-threshold-answerability-v9
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
 GEMINI_TIMEOUT=20
 LINE_QUERY_PLANNING_ENABLED=1
@@ -45,7 +50,10 @@ LINE_KNOWLEDGE_EXCERPT_CHARS=900
 Minimum variables to add or verify in Zeabur:
 
 ```bash
-APP_VERSION=2026-04-30-threshold-answerability-v9
+APP_VERSION=2026-04-30-deepseek-provider-v10
+LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=...
+DEEPSEEK_MODEL=deepseek-v4-pro
 LINE_MEMORY_ENABLED=1
 LINE_CONTEXT_ENABLED=1
 LINE_SESSION_SCOPE=user
@@ -60,15 +68,16 @@ LINE_EVIDENCE_REVIEW_ENABLED=1
 
 The same minimal set is also saved in `zeabur.env.example`.
 
-`GOOGLE_API_KEY` is also accepted as a fallback. If Google AI Studio changes the
-preview model name, set `GEMINI_MODEL` to the new model name in Zeabur without
-changing the code.
+`GOOGLE_API_KEY` is also accepted as a Gemini fallback. To use Gemini instead
+of DeepSeek, set `LLM_PROVIDER=gemini` and configure `GEMINI_API_KEY` or
+`GOOGLE_API_KEY`. To use DeepSeek's lower-latency model, set
+`DEEPSEEK_MODEL=deepseek-v4-flash`.
 
 ## Background Knowledge
 
 The webhook loads diabetes guideline Markdown files from `LINE_KNOWLEDGE_DIR`
 plus optional files listed in `LINE_KNOWLEDGE_EXTRA_PATHS`, then performs local
-file-based retrieval before each Gemini answer. This is meant for LINE DM
+file-based retrieval before each LLM answer. This is meant for LINE DM
 patient-education grounding, not for long-term user memory.
 
 Default source inside Zeabur/container:
@@ -139,12 +148,12 @@ guideline folder is still missing or empty.
 Strict mode is enabled by default. When `LINE_KNOWLEDGE_STRICT=1`, the bot only
 answers from retrieved guideline snippets. If the loaded guideline knowledge
 base does not contain enough relevant support, it should decline instead of
-using Gemini's general medical knowledge.
+using the configured model's general medical knowledge.
 
 ## Guideline Reasoning Flow
 
-The bot uses Gemini for reasoning over the local guideline knowledge base, not
-as an independent medical source.
+The bot uses the configured LLM only for reasoning over the local guideline
+knowledge base, not as an independent medical source.
 
 Default behavior:
 
@@ -171,17 +180,17 @@ Per message, the flow is:
 4. Merge candidates with coverage-aware and MMR-style selection so complementary
    evidence facets, sources, and sections are less likely to be crowded out by
    repeated snippets from one chapter.
-5. Retrieve a candidate pool, then ask Gemini to rerank only those candidates
+5. Retrieve a candidate pool, then ask the configured LLM to rerank only those candidates
    and decide whether the snippets cover all core concepts in the question.
 6. Apply a local coverage safety net so a conservative LLM reranker cannot
    reject an answer when selected snippets already cover required facets such
    as CKD, medication, and eGFR thresholds.
-7. Ask Gemini to organize only the selected guideline snippets into an evidence
+7. Ask the configured LLM to organize only the selected guideline snippets into an evidence
    review, including source names and coverage gaps.
 8. Generate the final Traditional Chinese LINE answer from the guideline
    snippets and evidence review.
 
-The final answer prompt still forbids Gemini from using its built-in medical
+The final answer prompt still forbids the configured model from using built-in medical
 knowledge, unmounted guidelines, news, or unsupported inference.
 
 ## LINE User Name Memory
@@ -274,7 +283,9 @@ The health check should include:
 
 ```json
 {
-  "app_version": "2026-04-30-threshold-answerability-v9",
+  "app_version": "2026-04-30-deepseek-provider-v10",
+  "llm_provider": "deepseek",
+  "model": "deepseek-v4-pro",
   "features": {
     "english_name_memory": true,
     "trailing_question_removal": true,
@@ -293,6 +304,7 @@ The health check should include:
     "mmr_style_diversity": true,
     "local_coverage_answerability": true,
     "comparative_threshold_answering": true,
+    "deepseek_provider": true,
     "llm_reranker": true,
     "coverage_answerability_check": true,
     "ada_strict_grounding": true,

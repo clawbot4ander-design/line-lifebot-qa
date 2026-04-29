@@ -65,8 +65,18 @@ except ModuleNotFoundError:
 
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-APP_VERSION = os.getenv("APP_VERSION", "2026-04-30-threshold-answerability-v9")
+DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
+APP_VERSION = os.getenv("APP_VERSION", "2026-04-30-deepseek-provider-v10")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
+DEEPSEEK_REASONING_EFFORT = os.getenv("DEEPSEEK_REASONING_EFFORT", "high")
+DEEPSEEK_THINKING_ENABLED = os.getenv("DEEPSEEK_THINKING_ENABLED", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
 GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "20"))
 LINE_QUERY_PLANNING_ENABLED = os.getenv("LINE_QUERY_PLANNING_ENABLED", "1").strip().lower() not in {
     "0",
@@ -581,7 +591,7 @@ def session_lock(session_key: str) -> threading.Lock:
 def answer_for_session(session_key: str, user_text: str) -> str:
     with session_lock(session_key):
         memory_answer = memory_command_response(session_key, user_text)
-        answer = memory_answer or gemini_answer(user_text, session_key)
+        answer = memory_answer or llm_answer(user_text, session_key)
         if not is_context_reset_command(user_text):
             save_conversation_turn(session_key, user_text, answer)
         return answer
@@ -595,6 +605,22 @@ def extract_gemini_text(payload: dict[str, Any]) -> str:
             if part.get("text"):
                 parts.append(str(part["text"]))
     return "\n".join(parts).strip()
+
+
+def active_model() -> str:
+    if LLM_PROVIDER == "deepseek":
+        return DEEPSEEK_MODEL
+    return GEMINI_MODEL
+
+
+def active_api_key() -> str:
+    if LLM_PROVIDER == "deepseek":
+        return os.getenv("DEEPSEEK_API_KEY", "").strip()
+    return os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
+
+
+def llm_configured() -> bool:
+    return bool(active_api_key())
 
 
 def call_gemini(
@@ -628,6 +654,68 @@ def call_gemini(
     return extract_gemini_text(payload)
 
 
+def extract_deepseek_text(payload: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for choice in payload.get("choices", []):
+        message = choice.get("message") or {}
+        content = message.get("content")
+        if content:
+            parts.append(str(content))
+    return "\n".join(parts).strip()
+
+
+def call_deepseek(
+    api_key: str,
+    system_text: str,
+    user_text: str,
+    max_output_tokens: int = 650,
+    temperature: float = 0.4,
+    timeout: int | None = None,
+) -> str:
+    body: dict[str, Any] = {
+        "model": DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": system_text},
+            {"role": "user", "content": user_text},
+        ],
+        "max_tokens": max_output_tokens,
+        "temperature": temperature,
+        "stream": False,
+    }
+    if DEEPSEEK_THINKING_ENABLED:
+        body["thinking"] = {"type": "enabled"}
+        if DEEPSEEK_REASONING_EFFORT:
+            body["reasoning_effort"] = DEEPSEEK_REASONING_EFFORT
+    else:
+        body["thinking"] = {"type": "disabled"}
+
+    request = urllib.request.Request(
+        f"{DEEPSEEK_API_BASE}/chat/completions",
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout or GEMINI_TIMEOUT) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    return extract_deepseek_text(payload)
+
+
+def call_llm(
+    api_key: str,
+    system_text: str,
+    user_text: str,
+    max_output_tokens: int = 650,
+    temperature: float = 0.4,
+    timeout: int | None = None,
+) -> str:
+    if LLM_PROVIDER == "deepseek":
+        return call_deepseek(api_key, system_text, user_text, max_output_tokens, temperature, timeout)
+    return call_gemini(api_key, system_text, user_text, max_output_tokens, temperature, timeout)
+
+
 def extract_json_object(text: str) -> dict[str, Any]:
     match = re.search(r"\{.*\}", text, flags=re.S)
     if not match:
@@ -657,7 +745,7 @@ def build_retrieval_query(api_key: str, user_text: str, recent_context: str) -> 
         "請產生適合全文檢索糖尿病指南 Markdown 的查詢。"
     )
     try:
-        raw = call_gemini(
+        raw = call_llm(
             api_key,
             system_text,
             prompt,
@@ -666,7 +754,7 @@ def build_retrieval_query(api_key: str, user_text: str, recent_context: str) -> 
             timeout=min(GEMINI_TIMEOUT, 10),
         )
     except Exception as exc:
-        print(f"Gemini query planning failed: {type(exc).__name__}: {exc}")
+        print(f"{LLM_PROVIDER} query planning failed: {type(exc).__name__}: {exc}")
         return user_text
 
     data = extract_json_object(raw)
@@ -728,7 +816,7 @@ def select_guideline_hits(api_key: str, user_text: str, candidates: list[Knowled
         f"請選出最多 {LINE_LLM_RERANK_TOP_K} 個最能回答問題的候選 id，並判斷 evidence coverage 是否足夠。"
     )
     try:
-        raw = call_gemini(
+        raw = call_llm(
             api_key,
             system_text,
             prompt,
@@ -737,7 +825,7 @@ def select_guideline_hits(api_key: str, user_text: str, candidates: list[Knowled
             timeout=min(GEMINI_TIMEOUT, 12),
         )
     except Exception as exc:
-        print(f"Gemini rerank failed: {type(exc).__name__}: {exc}")
+        print(f"{LLM_PROVIDER} rerank failed: {type(exc).__name__}: {exc}")
         return candidates[:LINE_LLM_RERANK_TOP_K], True, "Reranker failed; using local ranking."
 
     data = extract_json_object(raw)
@@ -810,7 +898,7 @@ def build_evidence_review(api_key: str, user_text: str, knowledge_text: str) -> 
     )
     prompt = f"使用者問題：{user_text}\n\n{knowledge_text}\n\n請先整理證據，不要寫給病友看的最終答案。"
     try:
-        return call_gemini(
+        return call_llm(
             api_key,
             system_text,
             prompt,
@@ -819,7 +907,7 @@ def build_evidence_review(api_key: str, user_text: str, knowledge_text: str) -> 
             timeout=min(GEMINI_TIMEOUT, 12),
         ).strip()
     except Exception as exc:
-        print(f"Gemini evidence review failed: {type(exc).__name__}: {exc}")
+        print(f"{LLM_PROVIDER} evidence review failed: {type(exc).__name__}: {exc}")
         return ""
 
 
@@ -893,10 +981,10 @@ def remove_trailing_question(text: str) -> str:
     return text.strip()
 
 
-def gemini_answer(user_text: str, line_user_id: str = "") -> str:
-    api_key = os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
+def llm_answer(user_text: str, line_user_id: str = "") -> str:
+    api_key = active_api_key()
     if not api_key:
-        return "目前快速問答服務尚未設定 Gemini API key。若你有血糖不舒服、低血糖症狀或血糖持續很高，請先聯絡醫療團隊。"
+        return f"目前快速問答服務尚未設定 {LLM_PROVIDER} API key。若你有血糖不舒服、低血糖症狀或血糖持續很高，請先聯絡醫療團隊。"
 
     recent_context = conversation_prompt(line_user_id)
     retrieval_query = build_retrieval_query(api_key, user_text, recent_context)
@@ -921,7 +1009,7 @@ def gemini_answer(user_text: str, line_user_id: str = "") -> str:
         + evidence_review_prompt(evidence_review)
     )
     try:
-        answer = call_gemini(
+        answer = call_llm(
             api_key,
             system_text,
             f"病友問題：{user_text}\n\n請先完整檢視本輪指南片段與證據整理，再用繁體中文回答。不要提出追問。",
@@ -934,9 +1022,9 @@ def gemini_answer(user_text: str, line_user_id: str = "") -> str:
         return "目前系統暫時沒有產生完整回覆。若你有明顯不舒服或血糖異常，請先聯絡醫療團隊。"
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:200]
-        print(f"Gemini HTTP {exc.code}: {detail}")
+        print(f"{LLM_PROVIDER} HTTP {exc.code}: {detail}")
     except Exception as exc:
-        print(f"Gemini request failed: {type(exc).__name__}: {exc}")
+        print(f"{LLM_PROVIDER} request failed: {type(exc).__name__}: {exc}")
     return "目前快速問答暫時無法回覆。若你有低血糖症狀、血糖持續很高、胸痛、意識不清或明顯不舒服，請先聯絡醫療團隊或就醫。"
 
 
@@ -968,8 +1056,12 @@ def health() -> dict[str, Any]:
         "ok": True,
         "service": "line-lifebot-qa",
         "app_version": APP_VERSION,
-        "model": GEMINI_MODEL,
+        "llm_provider": LLM_PROVIDER,
+        "model": active_model(),
+        "llm_configured": llm_configured(),
         "gemini_configured": bool(os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()),
+        "deepseek_configured": bool(os.getenv("DEEPSEEK_API_KEY", "").strip()),
+        "deepseek_thinking_enabled": DEEPSEEK_THINKING_ENABLED if LLM_PROVIDER == "deepseek" else False,
         "line_configured": bool(os.getenv("LINE_CHANNEL_SECRET", "").strip() and os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()),
         "memory_enabled": LINE_MEMORY_ENABLED,
         "memory_backend": memory_backend(),
@@ -993,6 +1085,7 @@ def health() -> dict[str, Any]:
             "mmr_style_diversity": True,
             "local_coverage_answerability": True,
             "comparative_threshold_answering": True,
+            "deepseek_provider": True,
             "llm_reranker": LINE_LLM_RERANK_ENABLED,
             "coverage_answerability_check": True,
             "ada_strict_grounding": True,
