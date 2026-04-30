@@ -103,6 +103,9 @@ LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_KNOWLEDGE_CHUNK_CHARS=1800
 LINE_KNOWLEDGE_PARENT_CONTEXT_CHARS=900
 LINE_KNOWLEDGE_SOURCE_MIN_CANDIDATES=2
+LINE_KNOWLEDGE_KDIGO_CKD_BOOST=1.85
+LINE_KNOWLEDGE_KDIGO_CKD_MEDICATION_BOOST=1.35
+LINE_KNOWLEDGE_AACE_MEDICATION_BOOST=1.25
 LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
 LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
 LINE_KNOWLEDGE_MAX_SNIPPETS=5
@@ -193,6 +196,8 @@ Per message, the flow is:
 5. Merge candidates with source-balanced, coverage-aware, and MMR-style
    selection so KDIGO/AACE snippets are less likely to be crowded out by repeated
    ADA chapter snippets.
+   CKD/eGFR/UACR/albuminuria questions additionally boost KDIGO candidates, while
+   pharmacologic questions keep AACE/ADA medication context in the candidate set.
 6. Retrieve a candidate pool, then ask the configured LLM to rerank only those candidates
    using the clinical intent JSON and decide whether the snippets cover all core
    concepts in the question.

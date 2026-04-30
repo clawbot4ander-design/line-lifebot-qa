@@ -1234,6 +1234,15 @@ def domain_adjustment(query: str, chunk: KnowledgeChunk) -> float:
     glycemic_goal_query = any(term in query for term in ("血糖控制", "控制目標", "血糖目標", "目標")) or any(
         term in query_lower for term in ("glycemic goal", "glycemic target", "glucose target", "a1c goal")
     )
+    kidney_query = any(term in query for term in ("腎", "腎絲球", "腎病變", "腎衰竭", "尿蛋白", "白蛋白尿")) or any(
+        term in query_lower for term in ("ckd", "kidney", "renal", "egfr", "uacr", "albuminuria", "proteinuria")
+    )
+    kidney_medication_query = kidney_query and (
+        any(term in query for term in ("藥", "用藥", "降血糖", "合併")) or any(
+            term in query_lower
+            for term in ("medication", "pharmacologic", "sglt", "glp", "metformin", "finerenone", "insulin")
+        )
+    )
     dialysis_query = any(term in query for term in ("洗腎", "透析", "腎衰竭")) or any(
         term in query_lower for term in ("dialysis", "kidney failure", "stage g5", "eskd", "esrd")
     )
@@ -1253,6 +1262,12 @@ def domain_adjustment(query: str, chunk: KnowledgeChunk) -> float:
         adjustment *= 1.18
     if re.search(r"\b(egfr|albuminuria|uacr|mg/g|ml/min|contraindicat|avoid|dose|dosage|adjust|threshold|initiat|discontinu)\b", haystack):
         adjustment *= 1.18
+    if kidney_query and "kdigo" in haystack:
+        adjustment *= float(os.getenv("LINE_KNOWLEDGE_KDIGO_CKD_BOOST", "1.85"))
+    if kidney_medication_query and "kdigo" in haystack:
+        adjustment *= float(os.getenv("LINE_KNOWLEDGE_KDIGO_CKD_MEDICATION_BOOST", "1.35"))
+    if kidney_medication_query and "aace" in haystack:
+        adjustment *= float(os.getenv("LINE_KNOWLEDGE_AACE_MEDICATION_BOOST", "1.25"))
     if glycemic_goal_query and ("glycemic goals" in haystack or "setting and modifying glycemic goals" in haystack):
         adjustment *= 2.8
     if glycemic_goal_query and ("dc26s006" in haystack or "glycemic goals, hypoglycemia" in haystack):

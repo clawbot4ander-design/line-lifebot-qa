@@ -957,7 +957,7 @@ def select_guideline_hits(
         "你會收到 clinical intent JSON；請根據 required_facets 與 answer_strategy 判斷片段是否足夠，而不是只看候選片段是否逐字命中使用者原句。"
         "請特別檢查問題中的所有核心概念是否都有片段支持，例如藥物類別、疾病階段、eGFR 門檻、禁忌或安全限制。"
         "優先選擇 recommendation、treatment、selection、screening、diagnosis、table_row、含 eGFR/threshold/contraindication/avoid/dose 的片段。"
-        "若 CKD/eGFR/腎臟問題有 ADA、KDIGO、AACE 或其他已載入指南中的 CKD、藥物選擇、eGFR 門檻相關候選，請優先保留它們；若片段不足以完整回答，answerable 必須是 false。"
+        "若 CKD/eGFR/albuminuria/UACR/finerenone/腎臟問題有 KDIGO 候選，請優先檢查並保留 KDIGO，因為腎臟病分期、eGFR、albuminuria 與腎臟保護治療通常以 KDIGO 較完整；再搭配 ADA/AACE 的糖尿病用藥與整體照護片段。若片段不足以完整回答，answerable 必須是 false。"
         "若使用者問洗腎/透析時血糖控制目標，但候選片段顯示沒有單一固定數字、需個別化、A1C 在 advanced CKD 較不可靠，並提供 CGM/BGM 或替代指標片段，這種情況可判定 answerable=true，用來回答「指南沒有固定單一目標，應個別化」。"
         "若使用者問特定 eGFR 數值下的用藥或合併用藥，而候選片段提供 eGFR 起始/使用門檻（例如 ≥20、≥25、≥30）或 CKD glucose-lowering therapy 建議，這可以回答「哪些藥物在此數值下不符合起始條件、哪些需依指南條件評估」，answerable 可為 true；不要因為片段沒有逐字寫出該 exact eGFR 數字就判 false。"
         "只輸出 JSON，格式：{\"selected_ids\":[1,2,3],\"answerable\":true,\"coverage_gaps\":[\"...\"]}。"
