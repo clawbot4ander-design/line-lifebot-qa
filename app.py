@@ -26,8 +26,10 @@ try:
         knowledge_prompt_from_hits,
         knowledge_status,
         hit_facets,
+        query_variant_specs,
         required_facets,
         search_knowledge_candidates,
+        search_whole_section_context,
     )
 except ModuleNotFoundError:
     KnowledgeHit = Any
@@ -39,6 +41,12 @@ except ModuleNotFoundError:
         )
 
     def search_knowledge_candidates(query: str) -> list[Any]:
+        return []
+
+    def search_whole_section_context(query: str, seed_hits: list[Any]) -> list[Any]:
+        return []
+
+    def query_variant_specs(query: str) -> list[Any]:
         return []
 
     def knowledge_candidates_prompt(hits: list[Any]) -> str:
@@ -66,7 +74,7 @@ except ModuleNotFoundError:
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
-APP_VERSION = os.getenv("APP_VERSION", "2026-04-30-cgm-routing-v17")
+APP_VERSION = os.getenv("APP_VERSION", "2026-05-01-debug-section-v18")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
@@ -111,6 +119,19 @@ LINE_LONG_CONTEXT_VERIFICATION_ENABLED = os.getenv("LINE_LONG_CONTEXT_VERIFICATI
     "no",
     "off",
 }
+LINE_WHOLE_SECTION_CONTEXT_ENABLED = os.getenv("LINE_WHOLE_SECTION_CONTEXT_ENABLED", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+LINE_DEBUG_SEARCH_ENABLED = os.getenv("LINE_DEBUG_SEARCH_ENABLED", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+LINE_DEBUG_SEARCH_MAX_HITS = int(os.getenv("LINE_DEBUG_SEARCH_MAX_HITS", "12"))
 LINE_RETRIEVAL_QUERY_MAX_CHARS = int(os.getenv("LINE_RETRIEVAL_QUERY_MAX_CHARS", "1400"))
 LINE_TIMEOUT = int(os.getenv("LINE_TIMEOUT", "12"))
 LINE_MEMORY_ENABLED = os.getenv("LINE_MEMORY_ENABLED", "1").strip() != "0"
@@ -1061,6 +1082,52 @@ def append_recursive_coverage_hits(
     return selected_hits, "recursive coverage retrieval 已執行，但沒有找到新的非重複片段。"
 
 
+def broad_section_context_needed(
+    user_text: str,
+    hits: list[KnowledgeHit],
+    clinical_intent: dict[str, Any] | None = None,
+) -> bool:
+    if not LINE_WHOLE_SECTION_CONTEXT_ENABLED:
+        return False
+    lower = f"{user_text} {clinical_intent_text(clinical_intent)}".lower()
+    facets = set(required_facets(user_text))
+    facets.update(required_facets(clinical_intent_text(clinical_intent)))
+    facets.update(json_list((clinical_intent or {}).get("required_facets")))
+    if "technology_indication" in facets:
+        return True
+    broad_terms = ("哪些", "哪種", "誰可以", "適用", "適合", "使用對象", "建議", "怎麼選", "治療建議")
+    if any(term in user_text for term in broad_terms):
+        return True
+    if any(term in lower for term in ("who should", "indication", "recommended population", "management recommendation")):
+        return True
+    return any("whole_section_context" in getattr(hit, "metadata", ()) for hit in hits)
+
+
+def append_whole_section_context_hits(
+    user_text: str,
+    selected_hits: list[KnowledgeHit],
+    clinical_intent: dict[str, Any] | None = None,
+) -> tuple[list[KnowledgeHit], str]:
+    if not selected_hits or not broad_section_context_needed(user_text, selected_hits, clinical_intent):
+        return selected_hits, ""
+    whole_hits = search_whole_section_context(user_text, selected_hits)
+    if not whole_hits:
+        return selected_hits, "whole-section context 已觸發，但沒有找到可加入的完整 section。"
+    seen = {hit_identity(hit) for hit in selected_hits}
+    merged = list(selected_hits)
+    added = 0
+    for hit in whole_hits:
+        key = hit_identity(hit)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(hit)
+        added += 1
+    if not added:
+        return selected_hits, ""
+    return merged, f"whole-section context 補入 {added} 個完整相關章節。"
+
+
 def comparative_threshold_question(user_text: str) -> bool:
     lower = user_text.lower()
     has_numeric_threshold = bool(re.search(r"\b\d+(?:\.\d+)?\b", user_text))
@@ -1333,6 +1400,79 @@ def remove_trailing_question(text: str) -> str:
     return text.strip()
 
 
+def serialize_debug_hit(hit: KnowledgeHit, index: int) -> dict[str, Any]:
+    facets = sorted(hit_facets(hit))
+    return {
+        "id": index,
+        "source": getattr(hit, "source", ""),
+        "source_label": getattr(hit, "source_label", ""),
+        "title": getattr(hit, "title", ""),
+        "section": getattr(hit, "section", ""),
+        "chunk_type": getattr(hit, "chunk_type", ""),
+        "score": round(float(getattr(hit, "score", 0.0)), 3),
+        "metadata": list(getattr(hit, "metadata", ())[:24]),
+        "facets": facets,
+        "has_parent_excerpt": bool(getattr(hit, "parent_excerpt", "")),
+        "excerpt": re.sub(r"\s+", " ", str(getattr(hit, "excerpt", ""))).strip()[:420],
+        "parent_excerpt": re.sub(r"\s+", " ", str(getattr(hit, "parent_excerpt", ""))).strip()[:420],
+    }
+
+
+def debug_search_trace(user_text: str, use_llm: bool = False) -> dict[str, Any]:
+    api_key = active_api_key() if use_llm else ""
+    recent_context = ""
+    clinical_intent = build_clinical_intent(api_key, user_text, recent_context) if use_llm else fallback_clinical_intent(user_text)
+    retrieval_query = build_retrieval_query(api_key, user_text, recent_context, clinical_intent) if use_llm else " ".join(
+        part for part in [user_text, clinical_intent_text(clinical_intent)] if part
+    ).strip()
+    variants = query_variant_specs(retrieval_query)
+    candidates = search_knowledge_candidates(retrieval_query)
+    selected_hits, answerable, coverage_gaps = select_guideline_hits(api_key, user_text, candidates, clinical_intent)
+    selected_hits, recursive_note = append_recursive_coverage_hits(user_text, selected_hits, clinical_intent)
+    selected_hits, whole_section_note = append_whole_section_context_hits(user_text, selected_hits, clinical_intent)
+    local_answerable, local_gap = local_evidence_coverage(user_text, selected_hits, clinical_intent)
+    covered_facets: set[str] = set()
+    for hit in selected_hits:
+        covered_facets.update(hit_facets(hit))
+    required = set(required_facets(user_text))
+    required.update(required_facets(clinical_intent_text(clinical_intent)))
+    required.update(json_list((clinical_intent or {}).get("required_facets")))
+    return {
+        "query": user_text,
+        "use_llm": use_llm,
+        "retrieval_query": retrieval_query,
+        "clinical_intent": clinical_intent,
+        "query_variants": [
+            {
+                "label": getattr(variant, "label", ""),
+                "weight": getattr(variant, "weight", 0.0),
+                "text": getattr(variant, "text", ""),
+            }
+            for variant in variants
+        ],
+        "required_facets": sorted(required),
+        "covered_facets": sorted(covered_facets),
+        "missing_facets": sorted(required - covered_facets),
+        "candidate_count": len(candidates),
+        "candidates": [
+            serialize_debug_hit(hit, index)
+            for index, hit in enumerate(candidates[:LINE_DEBUG_SEARCH_MAX_HITS], start=1)
+        ],
+        "selected_count": len(selected_hits),
+        "selected_hits": [
+            serialize_debug_hit(hit, index)
+            for index, hit in enumerate(selected_hits[: max(LINE_DEBUG_SEARCH_MAX_HITS, LINE_LLM_RERANK_TOP_K)], start=1)
+        ],
+        "rerank_answerable": answerable,
+        "local_answerable": local_answerable,
+        "coverage_gaps": coverage_gaps,
+        "local_gap": local_gap,
+        "recursive_note": recursive_note,
+        "whole_section_note": whole_section_note,
+        "knowledge": knowledge_status(),
+    }
+
+
 def llm_answer(user_text: str, line_user_id: str = "") -> str:
     api_key = active_api_key()
     if not api_key:
@@ -1355,6 +1495,14 @@ def llm_answer(user_text: str, line_user_id: str = "") -> str:
             rerank_answerable = True
         elif recursive_gap:
             coverage_gaps = (coverage_gaps + "；" if coverage_gaps else "") + recursive_gap
+        selected_hits, whole_section_note = append_whole_section_context_hits(user_text, selected_hits, clinical_intent)
+        if whole_section_note:
+            coverage_gaps = (coverage_gaps + "；" if coverage_gaps else "") + whole_section_note
+        whole_answerable, whole_gap = local_evidence_coverage(user_text, selected_hits, clinical_intent)
+        if whole_answerable:
+            rerank_answerable = True
+        elif whole_gap:
+            coverage_gaps = (coverage_gaps + "；" if coverage_gaps else "") + whole_gap
     if not selected_hits or not rerank_answerable:
         return knowledge_no_answer_text()
 
@@ -1479,8 +1627,10 @@ def health() -> dict[str, Any]:
             "parent_child_section_retrieval": True,
             "structured_metadata_extraction": True,
             "recursive_coverage_retrieval": LINE_RECURSIVE_COVERAGE_ENABLED,
+            "whole_section_context": LINE_WHOLE_SECTION_CONTEXT_ENABLED,
             "local_hashed_vector_index": True,
             "long_context_verification": LINE_LONG_CONTEXT_VERIFICATION_ENABLED,
+            "debug_search_endpoint": LINE_DEBUG_SEARCH_ENABLED,
             "guideline_strict_grounding_current": True,
             "guideline_query_planning_current": LINE_QUERY_PLANNING_ENABLED,
             "guideline_evidence_review_current": LINE_EVIDENCE_REVIEW_ENABLED,
@@ -1491,6 +1641,19 @@ def health() -> dict[str, Any]:
         "session_scope": LINE_SESSION_SCOPE,
         "knowledge": knowledge_status(),
     }
+
+
+@app.get("/debug/search")
+def debug_search(q: str = "", llm: bool = False, x_debug_token: str = Header(default="")) -> dict[str, Any]:
+    if not LINE_DEBUG_SEARCH_ENABLED:
+        raise HTTPException(status_code=404, detail="debug search disabled")
+    expected_token = os.getenv("LINE_DEBUG_TOKEN", "").strip()
+    if expected_token and not hmac.compare_digest(x_debug_token, expected_token):
+        raise HTTPException(status_code=403, detail="invalid debug token")
+    query = q.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="missing q")
+    return debug_search_trace(query, use_llm=llm)
 
 
 @app.post("/line/webhook")

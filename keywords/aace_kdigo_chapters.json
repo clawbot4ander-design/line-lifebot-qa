@@ -1,0 +1,105 @@
+{
+  "name": "aace_kdigo_chapters",
+  "description": "Chapter- and algorithm-aware routing keywords for AACE 2026 T2D algorithm and KDIGO 2026 Diabetes and CKD public review draft.",
+  "entries": [
+    {
+      "id": "aace_principles_comprehensive_care",
+      "triggers": ["AACE", "治療原則", "整體照護", "comprehensive care", "AACE algorithm", "AACE 2026"],
+      "expansions": ["AACE 2026", "principles of the AACE algorithm", "management of adults with type 2 diabetes", "comprehensive care", "lifestyle modification", "weight loss", "glycemic targets", "comorbidities", "complications", "CGM"],
+      "variant_queries": [
+        "AACE 2026 principles algorithm adults type 2 diabetes comprehensive care lifestyle weight loss glycemic targets comorbidities complications",
+        "AACE clinical guidance CGM highly recommended glycemic goals comprehensive diabetes care"
+      ]
+    },
+    {
+      "id": "aace_prediabetes_classification",
+      "triggers": ["AACE 診斷", "AACE 分類", "糖尿病分類", "prediabetes algorithm", "diabetes classification algorithm", "T1D phenotype"],
+      "expansions": ["AACE diabetes classification algorithm", "prediabetes algorithm", "diagnostic criteria", "T2D phenotype", "T1D phenotype", "C-peptide", "autoantibodies", "GAD", "LADA", "confirm diabetes mellitus"],
+      "variant_queries": [
+        "AACE diabetes classification algorithm diagnostic criteria T2D phenotype T1D autoantibodies C-peptide LADA",
+        "AACE prediabetes algorithm lifestyle metformin obesity ASCVD risk diabetes prevention"
+      ]
+    },
+    {
+      "id": "aace_ascvd_lipid_bp",
+      "triggers": ["AACE 心血管", "AACE ASCVD", "血脂", "dyslipidemia", "hypertension algorithm", "LDL target", "triglyceride"],
+      "expansions": ["AACE ASCVD risk reduction algorithm", "dyslipidemia", "hypertension", "lipid panel", "LDL-C", "statin", "triglycerides", "blood pressure", "ACE inhibitor", "ARB", "ASCVD risk"],
+      "variant_queries": [
+        "AACE ASCVD risk reduction dyslipidemia LDL-C statin triglycerides lipid targets diabetes",
+        "AACE hypertension algorithm blood pressure ACE inhibitor ARB diabetes ASCVD risk reduction"
+      ]
+    },
+    {
+      "id": "aace_comorbidity_centric_algorithm",
+      "triggers": ["AACE 共病", "complications-centric", "comorbidities-centric", "HF CKD ASCVD MASLD", "OSA"],
+      "expansions": ["AACE comorbidities- and complications-centric glycemic control algorithm", "HF", "CKD", "ASCVD", "stroke", "TIA", "MASLD", "OSA", "obesity", "GLP-1 RA", "SGLT2 inhibitor", "finerenone"],
+      "variant_queries": [
+        "AACE comorbidities complications centric glycemic control algorithm HF CKD ASCVD stroke TIA MASLD OSA",
+        "AACE medication selection GLP-1 RA SGLT2 inhibitor finerenone obesity MASLD cardiovascular kidney"
+      ]
+    },
+    {
+      "id": "aace_glucose_centric_insulin",
+      "triggers": ["AACE 胰島素", "insulin algorithm", "basal insulin", "prandial insulin", "premixed insulin", "titrate insulin"],
+      "expansions": ["AACE glucose-centric glycemic control algorithm", "initiating and titrating insulin algorithm", "basal insulin", "prandial insulin", "premixed insulin", "hypoglycemia", "CGM", "fasting blood glucose", "postprandial glucose", "A1C target"],
+      "variant_queries": [
+        "AACE glucose-centric glycemic control algorithm A1C target hypoglycemia medication hierarchy",
+        "AACE initiating titrating insulin basal prandial premixed insulin CGM fasting postprandial glucose"
+      ]
+    },
+    {
+      "id": "aace_pharmacotherapy_profiles_obesity",
+      "triggers": ["AACE 藥物", "AACE 減重", "pharmacotherapy profile", "profiles of pharmacotherapy", "obesity pharmacotherapy"],
+      "expansions": ["AACE profiles of pharmacotherapy for type 2 diabetes", "profiles of pharmacotherapy for obesity", "metformin", "SGLT2 inhibitor", "GLP-1 RA", "dual GIP GLP-1 RA", "tirzepatide", "semaglutide", "orlistat", "phentermine", "topiramate", "naltrexone", "bupropion"],
+      "variant_queries": [
+        "AACE profiles pharmacotherapy type 2 diabetes metformin SGLT2 GLP-1 RA tirzepatide hypoglycemia weight ASCVD CKD",
+        "AACE profiles pharmacotherapy obesity semaglutide tirzepatide anti-obesity medication weight loss diabetes"
+      ]
+    },
+    {
+      "id": "kdigo_chapter1_staging_risk",
+      "triggers": ["KDIGO chapter 1", "KDIGO staging", "CKD 分期", "GFR category", "A1 A2 A3", "case-finding", "kidney risk"],
+      "expansions": ["KDIGO chapter 1 definitions prevention case-finding staging cardiovascular risk assessment", "CKD staging", "GFR categories", "albuminuria categories", "A1", "A2", "A3", "eGFR", "UACR", "case-finding", "cardiovascular-kidney risk"],
+      "variant_queries": [
+        "KDIGO chapter 1 definitions prevention case-finding staging CKD GFR categories albuminuria A1 A2 A3",
+        "KDIGO cardiovascular kidney risk diabetes CKD eGFR UACR risk prediction"
+      ]
+    },
+    {
+      "id": "kdigo_chapter2_glycemic_monitoring_targets",
+      "triggers": ["KDIGO chapter 2", "HbA1c CKD", "A1C 不準", "洗腎 A1C", "CKD CGM", "glycemic targets CKD"],
+      "expansions": ["KDIGO chapter 2 glycemic monitoring and targets", "HbA1c accuracy", "advanced CKD", "G4", "G5", "dialysis", "continuous glucose monitoring", "CGM", "time in range", "glycemic targets", "individualized HbA1c target", "glycated albumin", "fructosamine"],
+      "variant_queries": [
+        "KDIGO chapter 2 glycemic monitoring HbA1c accuracy advanced CKD G4 G5 dialysis CGM BGM",
+        "KDIGO glycemic targets diabetes CKD individualized HbA1c target time in range glycated albumin fructosamine"
+      ]
+    },
+    {
+      "id": "kdigo_chapter4_comprehensive_pharmacotherapy",
+      "triggers": ["KDIGO chapter 4", "KDIGO 藥物", "CKD 糖尿病藥", "comprehensive diabetes CKD management", "combination therapy"],
+      "expansions": ["KDIGO chapter 4 pharmacotherapy in people with diabetes and CKD", "comprehensive diabetes and CKD management", "combination therapy", "multidisciplinary care", "lipid management", "antiplatelet therapy", "SGLT2 inhibitor", "RAS blockade", "MRA", "GLP-1-based therapies", "metformin"],
+      "variant_queries": [
+        "KDIGO chapter 4 pharmacotherapy diabetes CKD comprehensive care combination therapy multidisciplinary care lipid antiplatelet",
+        "KDIGO pharmacotherapy SGLT2 inhibitor RAS blockade MRA GLP-1 based therapies metformin diabetes CKD"
+      ]
+    },
+    {
+      "id": "kdigo_ras_sglt2_mra",
+      "triggers": ["KDIGO RAS", "KDIGO SGLT2", "KDIGO MRA", "ACEI CKD", "ARB CKD", "nsMRA", "hyperkalemia"],
+      "expansions": ["KDIGO RAS blockade", "ACE inhibitor", "ARB", "SGLT2 inhibitor", "eGFR initiation threshold", "continue SGLT2i", "mineralocorticoid receptor antagonist", "nonsteroidal MRA", "finerenone", "potassium monitoring", "hyperkalemia", "albuminuria"],
+      "variant_queries": [
+        "KDIGO RAS blockade ACE inhibitor ARB diabetes CKD albuminuria potassium creatinine monitoring",
+        "KDIGO SGLT2 inhibitor nsMRA finerenone eGFR threshold albuminuria hyperkalemia potassium monitoring"
+      ]
+    },
+    {
+      "id": "kdigo_glp1_metformin_type1",
+      "triggers": ["KDIGO GLP", "KDIGO metformin", "metformin CKD", "GLP-1 CKD", "T1D CKD"],
+      "expansions": ["KDIGO GLP-1-based therapies", "GLP-1 receptor agonist", "semaglutide", "liraglutide", "dulaglutide", "metformin", "eGFR", "dose adjustment", "type 1 diabetes", "insulin", "hypoglycemia", "kidney outcomes", "cardiovascular outcomes"],
+      "variant_queries": [
+        "KDIGO GLP-1 based therapies diabetes CKD semaglutide liraglutide dulaglutide kidney cardiovascular outcomes",
+        "KDIGO metformin diabetes CKD eGFR dose adjustment type 1 diabetes insulin hypoglycemia"
+      ]
+    }
+  ]
+}

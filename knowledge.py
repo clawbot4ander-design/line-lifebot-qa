@@ -843,6 +843,60 @@ def search_knowledge_candidates(query: str) -> list[KnowledgeHit]:
     return kb.search_multi(query, limit=limit, excerpt_chars=excerpt_chars)
 
 
+def search_whole_section_context(query: str, seed_hits: list[KnowledgeHit]) -> list[KnowledgeHit]:
+    kb = load_knowledge_base()
+    if not kb or not seed_hits:
+        return []
+
+    max_sections = int(os.getenv("LINE_WHOLE_SECTION_CONTEXT_MAX_SECTIONS", "2"))
+    max_chars = int(os.getenv("LINE_WHOLE_SECTION_CONTEXT_CHARS", "9000"))
+    query_tokens = list(expand_query_tokens(query))
+    results: list[KnowledgeHit] = []
+    seen: set[tuple[str, str]] = set()
+
+    for hit in seed_hits:
+        if len(results) >= max_sections:
+            break
+        key = (hit.source, hit.section)
+        if key in seen:
+            continue
+        seen.add(key)
+        chunk = best_section_context_chunk(kb, hit)
+        if not chunk:
+            continue
+        section_text = chunk.parent_text or chunk.text
+        if not section_text.strip():
+            continue
+        metadata = tuple(dedupe_terms([*chunk.metadata, "whole_section_context"]))
+        results.append(
+            KnowledgeHit(
+                source=chunk.source,
+                source_label=chunk.source_label,
+                title=chunk.title,
+                section=chunk.section,
+                chunk_type="whole_section",
+                excerpt=best_excerpt(section_text, query_tokens, max_chars),
+                parent_excerpt="",
+                metadata=metadata,
+                score=hit.score + 12.0,
+            )
+        )
+    return results
+
+
+def best_section_context_chunk(kb: KnowledgeBase, hit: KnowledgeHit) -> KnowledgeChunk | None:
+    candidates = [
+        chunk
+        for chunk in kb.chunks
+        if chunk.source == hit.source and chunk.section == hit.section and (chunk.parent_text or chunk.text)
+    ]
+    if not candidates:
+        return None
+    text_chunks = [chunk for chunk in candidates if chunk.chunk_type == "text"]
+    candidates = text_chunks or candidates
+    return max(candidates, key=lambda chunk: len(chunk.parent_text or chunk.text))
+
+
 def knowledge_no_answer_text() -> str:
     return (
         "目前我在已載入的糖尿病指南知識庫中，找不到足夠直接的依據回答這個問題。"
@@ -1261,7 +1315,15 @@ def coverage_rerank_hits(query: str, hits: list[KnowledgeHit], limit: int) -> li
     if not hits:
         return []
 
-    sorted_hits = source_balanced_hits(sorted(hits, key=lambda hit: hit.score, reverse=True), max(limit * 3, limit))
+    ranked_hits = sorted(hits, key=lambda hit: hit.score, reverse=True)
+    preferred_source = preferred_source_from_query(query)
+    if preferred_source:
+        sorted_hits = sorted(
+            ranked_hits,
+            key=lambda hit: (preferred_source not in hit.source_label.lower(), -hit.score),
+        )[: max(limit * 3, limit)]
+    else:
+        sorted_hits = source_balanced_hits(ranked_hits, max(limit * 3, limit))
     target_facets = required_facets(query)
     selected: list[KnowledgeHit] = []
     covered: set[str] = set()
@@ -1307,6 +1369,17 @@ def coverage_rerank_hits(query: str, hits: list[KnowledgeHit], limit: int) -> li
         covered.update(hit_facets(chosen))
 
     return selected
+
+
+def preferred_source_from_query(query: str) -> str:
+    lower = query.lower()
+    if "kdigo" in lower:
+        return "kdigo"
+    if "aace" in lower:
+        return "aace"
+    if re.search(r"\bada\b|american diabetes association|dc26s", lower):
+        return "ada"
+    return ""
 
 
 def source_balanced_hits(hits: list[KnowledgeHit], limit: int) -> list[KnowledgeHit]:
@@ -1591,6 +1664,12 @@ def domain_adjustment(query: str, chunk: KnowledgeChunk) -> float:
         adjustment *= 1.18
     if re.search(r"\b(egfr|albuminuria|uacr|mg/g|ml/min|contraindicat|avoid|dose|dosage|adjust|threshold|initiat|discontinu)\b", haystack):
         adjustment *= 1.18
+    if "kdigo" in query_lower:
+        adjustment *= 2.6 if "kdigo" in haystack else 0.58
+    if "aace" in query_lower:
+        adjustment *= 2.4 if "aace" in haystack else 0.65
+    if re.search(r"\bada\b|american diabetes association|dc26s", query_lower):
+        adjustment *= 2.2 if ("ada standards" in haystack or re.search(r"\bdc26s\d+\b", haystack)) else 0.72
     if kidney_query and "kdigo" in haystack:
         adjustment *= float(os.getenv("LINE_KNOWLEDGE_KDIGO_CKD_BOOST", "1.85"))
     if kidney_medication_query and "kdigo" in haystack:

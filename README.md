@@ -16,7 +16,7 @@ Obsidian/Google Drive archiving, image generation, and audio generation.
 ```bash
 LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
-APP_VERSION=2026-04-30-cgm-routing-v17
+APP_VERSION=2026-05-01-debug-section-v18
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -29,6 +29,13 @@ LINE_RECURSIVE_COVERAGE_MAX_QUERIES=4
 LINE_RECURSIVE_COVERAGE_MAX_HITS=4
 LINE_EVIDENCE_REVIEW_ENABLED=1
 LINE_LONG_CONTEXT_VERIFICATION_ENABLED=1
+LINE_WHOLE_SECTION_CONTEXT_ENABLED=1
+LINE_WHOLE_SECTION_CONTEXT_MAX_SECTIONS=2
+LINE_WHOLE_SECTION_CONTEXT_CHARS=9000
+LINE_DEBUG_SEARCH_ENABLED=1
+LINE_DEBUG_SEARCH_MAX_HITS=12
+# Optional: if set, /debug/search requires x-debug-token header.
+LINE_DEBUG_TOKEN=
 LINE_RETRIEVAL_QUERY_MAX_CHARS=1400
 LINE_TIMEOUT=12
 LINE_MEMORY_ENABLED=1
@@ -55,7 +62,7 @@ LINE_KNOWLEDGE_EXCERPT_CHARS=900
 Minimum variables to add or verify in Zeabur:
 
 ```bash
-APP_VERSION=2026-04-30-cgm-routing-v17
+APP_VERSION=2026-05-01-debug-section-v18
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -72,6 +79,8 @@ LINE_LLM_RERANK_ENABLED=1
 LINE_RECURSIVE_COVERAGE_ENABLED=1
 LINE_EVIDENCE_REVIEW_ENABLED=1
 LINE_LONG_CONTEXT_VERIFICATION_ENABLED=1
+LINE_WHOLE_SECTION_CONTEXT_ENABLED=1
+LINE_DEBUG_SEARCH_ENABLED=1
 ```
 
 The same minimal set is also saved in `zeabur.env.example`.
@@ -187,6 +196,11 @@ LINE_RECURSIVE_COVERAGE_MAX_QUERIES=4
 LINE_RECURSIVE_COVERAGE_MAX_HITS=4
 LINE_EVIDENCE_REVIEW_ENABLED=1
 LINE_LONG_CONTEXT_VERIFICATION_ENABLED=1
+LINE_WHOLE_SECTION_CONTEXT_ENABLED=1
+LINE_WHOLE_SECTION_CONTEXT_MAX_SECTIONS=2
+LINE_WHOLE_SECTION_CONTEXT_CHARS=9000
+LINE_DEBUG_SEARCH_ENABLED=1
+LINE_DEBUG_SEARCH_MAX_HITS=12
 LINE_RETRIEVAL_QUERY_MAX_CHARS=1400
 LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
 LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
@@ -223,10 +237,13 @@ Per message, the flow is:
    as CKD, medication, and eGFR thresholds.
 9. Ask the configured LLM to organize only the selected guideline snippets into an evidence
    review, including source names, coverage gaps, and the clinical intent answer strategy.
-10. Run long-context verification over the selected snippets plus parent section
+10. For broad questions, add whole-section context from the selected guideline
+    sections, so questions such as "which patients should use CGM?" can include
+    the full ADA S7 CGM subsection rather than only isolated table rows.
+11. Run long-context verification over the selected snippets plus parent section
     context. If the verifier still finds missing evidence, the app refuses to
     answer rather than filling gaps from model memory.
-11. Generate the final Traditional Chinese LINE answer from the guideline
+12. Generate the final Traditional Chinese LINE answer from the guideline
     snippets, evidence review, and long-context verification.
 
 The final answer prompt still forbids the configured model from using built-in medical
@@ -243,13 +260,15 @@ Current modules:
 ```text
 keywords/ada_2026_chapters.json
 keywords/core_diabetes_ada_aace.json
+keywords/aace_kdigo_chapters.json
 keywords/ckd_kdigo.json
 keywords/complications_special_populations.json
 ```
 
-The modules cover ADA 2026 chapter routing, ADA/AACE diabetes care terms, KDIGO
-CKD terms, and cross-guideline special populations/safety terms. They connect
-Chinese user language with guideline terms such as `dc26s011`, `MASLD`, `MASH`,
+The modules cover ADA 2026 chapter routing, AACE 2026 algorithm routing, KDIGO
+chapter/practice-point routing, ADA/AACE diabetes care terms, CKD terms, and
+cross-guideline special populations/safety terms. They connect Chinese user
+language with guideline terms such as `dc26s011`, `MASLD`, `MASH`,
 `NAFLD`, `NASH`, `CKD`, `DKD`, `eGFR`, `UACR`, `SGLT2 inhibitor`, `GLP-1 RA`,
 `finerenone`, `ASCVD`, `heart failure`, `hypoglycemia`, `GDM`, `older adults`,
 `perioperative`, and `foot care`.
@@ -274,6 +293,20 @@ LINE_KEYWORD_PATHS=/app/data/keywords
 The health check reports `knowledge.keyword_files`, `knowledge.keyword_entries`,
 `knowledge.metadata_tagged_chunks`, and `knowledge.vector_index_chunks` so
 deployment can verify the modules and hybrid retrieval index are loaded.
+
+## Debug Search
+
+Use `/debug/search` to inspect why a question can or cannot be answered:
+
+```text
+/debug/search?q=糖尿病的新科技——連續血糖監測，適用哪些病人呢？
+/debug/search?q=...&llm=true
+```
+
+The response includes the retrieval query, query variants, required facets,
+candidate hits, selected hits, recursive coverage notes, whole-section context
+notes, and missing facets. If `LINE_DEBUG_TOKEN` is set, include it as the
+`x-debug-token` header.
 
 ## LINE User Name Memory
 
@@ -411,7 +444,7 @@ The health check should include:
 
 ```json
 {
-  "app_version": "2026-04-30-cgm-routing-v17",
+  "app_version": "2026-05-01-debug-section-v18",
   "llm_provider": "gemini",
   "model": "gemini-3.1-flash-lite-preview",
   "features": {
@@ -444,8 +477,10 @@ The health check should include:
     "parent_child_section_retrieval": true,
     "structured_metadata_extraction": true,
     "recursive_coverage_retrieval": true,
+    "whole_section_context": true,
     "local_hashed_vector_index": true,
     "long_context_verification": true,
+    "debug_search_endpoint": true,
     "guideline_strict_grounding_current": true,
     "guideline_query_planning_current": true,
     "guideline_evidence_review_current": true
