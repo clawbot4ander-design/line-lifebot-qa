@@ -455,6 +455,7 @@ def knowledge_dirs() -> list[Path]:
             parent = legacy_path.parent
             raw_parts.extend(
                 [
+                    str(parent),
                     str(parent / "guidelines"),
                     str(parent / "adaguidelines"),
                     str(parent / "kdigoguidelines"),

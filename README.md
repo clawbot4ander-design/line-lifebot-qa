@@ -35,7 +35,7 @@ LINE_CONTEXT_TTL_SECONDS=43200
 DATABASE_URL=postgresql://...
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIRS=/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIRS=/app/data,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
 LINE_KNOWLEDGE_DIR=/app/data/guidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_KNOWLEDGE_PARENT_CONTEXT_CHARS=900
@@ -57,7 +57,7 @@ LINE_CONTEXT_ENABLED=1
 LINE_SESSION_SCOPE=user
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIRS=/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIRS=/app/data,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
 LINE_KNOWLEDGE_DIR=/app/data/guidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_QUERY_PLANNING_ENABLED=1
@@ -93,7 +93,7 @@ Useful settings:
 ```bash
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIRS=/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIRS=/app/data,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
 LINE_KNOWLEDGE_DIR=/app/data/guidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_KNOWLEDGE_CHUNK_CHARS=1800
@@ -124,7 +124,7 @@ have permission to redistribute them. Recommended deployment:
 ```bash
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIRS=/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIRS=/app/data,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 ```
 
