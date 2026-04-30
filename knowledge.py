@@ -9,6 +9,8 @@ import math
 import os
 import re
 import threading
+import urllib.error
+import urllib.request
 from typing import Iterable
 
 
@@ -20,6 +22,7 @@ DEFAULT_KNOWLEDGE_DIRS = (
 )
 DEFAULT_EXTRA_KNOWLEDGE_PATHS = ""
 DEFAULT_KEYWORD_DIR = Path(__file__).resolve().parent / "keywords"
+GEMINI_EMBEDDING_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9+-]*|\d+(?:\.\d+)?|[\u4e00-\u9fff]{1,4}")
 HEADING_RE = re.compile(r"^#{1,4}\s+(.+)$")
@@ -316,6 +319,8 @@ class KnowledgeBase:
         self.chunks: list[KnowledgeChunk] = []
         self.source_files: list[Path] = []
         self.vector_index: list[dict[int, float]] = []
+        self.dense_vector_index: list[list[float]] = []
+        self.dense_embedding_error = ""
         self.document_frequency: dict[str, int] = {}
         self.average_length = 1.0
         self.load()
@@ -328,6 +333,7 @@ class KnowledgeBase:
         self.source_files = source_files
         self.chunks = chunks
         self.vector_index = [hashed_vector(chunk.tokens) for chunk in chunks]
+        self.dense_vector_index, self.dense_embedding_error = build_dense_vector_index(chunks)
 
         df: dict[str, int] = {}
         lengths = []
@@ -421,11 +427,15 @@ class KnowledgeBase:
 
         query_vector = hashed_vector(query_tokens)
         vector_weight = float(os.getenv("LINE_KNOWLEDGE_VECTOR_WEIGHT", "0.55"))
+        dense_query_vector = dense_embed_query(query) if self.dense_vector_index else []
+        dense_vector_weight = float(os.getenv("LINE_DENSE_EMBEDDING_WEIGHT", "1.15"))
         scored: list[tuple[float, KnowledgeChunk]] = []
         for index, chunk in enumerate(self.chunks):
             score = self._score(query_tokens, chunk)
             if query_vector and index < len(self.vector_index):
                 score += sparse_cosine(query_vector, self.vector_index[index]) * vector_weight
+            if dense_query_vector and index < len(self.dense_vector_index):
+                score += dense_cosine(dense_query_vector, self.dense_vector_index[index]) * dense_vector_weight
             score *= domain_adjustment(query, chunk)
             if score > 0:
                 scored.append((score, chunk))
@@ -1087,6 +1097,7 @@ def knowledge_status() -> dict[str, object]:
     loaded_files_by_source: dict[str, int] = {}
     loaded_dirs_by_source: dict[str, list[str]] = {}
     chunk_type_counts: dict[str, int] = {}
+    ontology_tagged_chunks = 0
     if kb:
         for path in kb.source_files:
             label = guideline_source_label(str(path), path.read_text(encoding="utf-8", errors="ignore")[:5000])
@@ -1097,6 +1108,8 @@ def knowledge_status() -> dict[str, object]:
                 loaded_dirs_by_source[label].append(dir_value)
         for chunk in kb.chunks:
             chunk_type_counts[chunk.chunk_type] = chunk_type_counts.get(chunk.chunk_type, 0) + 1
+            if any(tag.startswith("ontology:") for tag in chunk.metadata):
+                ontology_tagged_chunks += 1
     return {
         "enabled": knowledge_enabled(),
         "dir": str(roots[0]) if roots else "",
@@ -1109,6 +1122,13 @@ def knowledge_status() -> dict[str, object]:
         "chunk_type_counts": chunk_type_counts,
         "metadata_tagged_chunks": sum(1 for chunk in kb.chunks if chunk.metadata) if kb else 0,
         "vector_index_chunks": len(kb.vector_index) if kb else 0,
+        "dense_embedding_enabled": dense_embedding_enabled(),
+        "dense_embedding_provider": dense_embedding_provider(),
+        "dense_embedding_model": dense_embedding_model(),
+        "dense_vector_index_chunks": sum(1 for vector in kb.dense_vector_index if vector) if kb else 0,
+        "dense_embedding_cache": str(dense_embedding_cache_path()),
+        "dense_embedding_error": kb.dense_embedding_error if kb else "",
+        "ontology_tagged_chunks": ontology_tagged_chunks,
         "files": len(kb.source_files) if kb else 0,
         "dir_files": dir_file_count,
         "extra_files": len(extra_existing),
@@ -1152,6 +1172,191 @@ def sparse_cosine(left: dict[int, float], right: dict[int, float]) -> float:
     return sum(value * right.get(key, 0.0) for key, value in left.items())
 
 
+_dense_query_cache: dict[str, list[float]] = {}
+
+
+def env_enabled(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def dense_embedding_enabled() -> bool:
+    return env_enabled("LINE_DENSE_EMBEDDING_ENABLED", "0")
+
+
+def dense_embedding_provider() -> str:
+    return os.getenv("LINE_DENSE_EMBEDDING_PROVIDER", "gemini").strip().lower()
+
+
+def dense_embedding_model() -> str:
+    return os.getenv("LINE_DENSE_EMBEDDING_MODEL", "text-embedding-004").strip()
+
+
+def dense_embedding_cache_path() -> Path:
+    return Path(os.getenv("LINE_DENSE_EMBEDDING_CACHE", "/tmp/line_lifebot_dense_embeddings.jsonl")).expanduser()
+
+
+def dense_embedding_api_key() -> str:
+    if dense_embedding_provider() == "gemini":
+        return os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip()
+    return ""
+
+
+def dense_embedding_text(chunk: KnowledgeChunk) -> str:
+    metadata = " ".join(chunk.metadata[:32])
+    value = "\n".join(
+        [
+            f"Source: {chunk.source_label}",
+            f"Title: {chunk.title}",
+            f"Section: {chunk.section}",
+            f"Type: {chunk.chunk_type}",
+            f"Metadata: {metadata}",
+            chunk.text,
+        ]
+    )
+    max_chars = int(os.getenv("LINE_DENSE_EMBEDDING_TEXT_CHARS", "1800"))
+    return value[:max_chars]
+
+
+def dense_cache_key(chunk: KnowledgeChunk) -> str:
+    digest = hashlib.sha1(dense_embedding_text(chunk).encode("utf-8", errors="ignore")).hexdigest()[:18]
+    return "|".join([dense_embedding_provider(), dense_embedding_model(), chunk.source, chunk.section, chunk.chunk_type, digest])
+
+
+def normalize_dense_vector(vector: list[float]) -> list[float]:
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm <= 0:
+        return []
+    return [value / norm for value in vector]
+
+
+def dense_cosine(left: list[float], right: list[float]) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    return sum(a * b for a, b in zip(left, right))
+
+
+def load_dense_embedding_cache(path: Path) -> dict[str, list[float]]:
+    if not path.exists() or not path.is_file():
+        return {}
+    cache: dict[str, list[float]] = {}
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                key = str(item.get("key") or "")
+                values = item.get("values")
+                if key and isinstance(values, list):
+                    vector = normalize_dense_vector([float(value) for value in values])
+                    if vector:
+                        cache[key] = vector
+    except OSError as exc:
+        print(f"dense embedding cache read failed: {path}: {type(exc).__name__}: {exc}")
+    return cache
+
+
+def write_dense_embedding_cache(path: Path, cache: dict[str, list[float]]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            for key, vector in cache.items():
+                handle.write(json.dumps({"key": key, "values": vector}, ensure_ascii=False) + "\n")
+        tmp_path.replace(path)
+    except OSError as exc:
+        print(f"dense embedding cache write failed: {path}: {type(exc).__name__}: {exc}")
+
+
+def build_dense_vector_index(chunks: list[KnowledgeChunk]) -> tuple[list[list[float]], str]:
+    if not dense_embedding_enabled():
+        return [], ""
+    api_key = dense_embedding_api_key()
+    if not api_key:
+        return [], "LINE_DENSE_EMBEDDING_ENABLED=1 but no Gemini API key is configured"
+
+    cache_path = dense_embedding_cache_path()
+    cache = load_dense_embedding_cache(cache_path)
+    keys = [dense_cache_key(chunk) for chunk in chunks]
+    vectors: list[list[float]] = [cache.get(key, []) for key in keys]
+    missing = [index for index, vector in enumerate(vectors) if not vector]
+    max_chunks = int(os.getenv("LINE_DENSE_EMBEDDING_MAX_CHUNKS", "0"))
+    if max_chunks > 0:
+        missing = missing[:max_chunks]
+    if missing:
+        batch_size = max(1, int(os.getenv("LINE_DENSE_EMBEDDING_BATCH_SIZE", "24")))
+        try:
+            for start in range(0, len(missing), batch_size):
+                batch_indexes = missing[start : start + batch_size]
+                texts = [dense_embedding_text(chunks[index]) for index in batch_indexes]
+                batch_vectors = gemini_embed_texts(api_key, texts)
+                for chunk_index, vector in zip(batch_indexes, batch_vectors):
+                    if vector:
+                        vectors[chunk_index] = vector
+                        cache[keys[chunk_index]] = vector
+            write_dense_embedding_cache(cache_path, cache)
+        except (OSError, urllib.error.URLError, ValueError) as exc:
+            return vectors, f"dense embedding build failed: {type(exc).__name__}: {exc}"
+    return vectors, ""
+
+
+def dense_embed_query(query: str) -> list[float]:
+    if not dense_embedding_enabled():
+        return []
+    key = f"{dense_embedding_provider()}|{dense_embedding_model()}|query|{hashlib.sha1(query.encode('utf-8', errors='ignore')).hexdigest()[:18]}"
+    if key in _dense_query_cache:
+        return _dense_query_cache[key]
+    api_key = dense_embedding_api_key()
+    if not api_key:
+        return []
+    try:
+        vectors = gemini_embed_texts(api_key, [query])
+    except (OSError, urllib.error.URLError, ValueError) as exc:
+        print(f"dense query embedding failed: {type(exc).__name__}: {exc}")
+        return []
+    vector = vectors[0] if vectors else []
+    if vector:
+        _dense_query_cache[key] = vector
+    return vector
+
+
+def gemini_embed_texts(api_key: str, texts: list[str]) -> list[list[float]]:
+    if dense_embedding_provider() != "gemini":
+        raise ValueError(f"unsupported dense embedding provider: {dense_embedding_provider()}")
+    model = dense_embedding_model()
+    model_name = model if model.startswith("models/") else f"models/{model}"
+    url_model = model.removeprefix("models/")
+    body = {
+        "requests": [
+            {
+                "model": model_name,
+                "content": {"parts": [{"text": text}]},
+            }
+            for text in texts
+        ]
+    }
+    request = urllib.request.Request(
+        f"{GEMINI_EMBEDDING_API_BASE}/{url_model}:batchEmbedContents",
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    timeout = int(os.getenv("LINE_DENSE_EMBEDDING_TIMEOUT", "30"))
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="replace"))
+    vectors: list[list[float]] = []
+    for item in payload.get("embeddings", []):
+        values = item.get("values") or []
+        vectors.append(normalize_dense_vector([float(value) for value in values]))
+    if len(vectors) != len(texts):
+        raise ValueError(f"Gemini embedding returned {len(vectors)} vectors for {len(texts)} texts")
+    return vectors
+
+
 def chunk_tokens(
     source_label: str,
     title: str,
@@ -1162,6 +1367,88 @@ def chunk_tokens(
 ) -> tuple[str, ...]:
     indexed_metadata = f"{source_label} {title} {section} {chunk_type} {' '.join(metadata)}"
     return tuple(tokenize(f"{indexed_metadata}\n{text}"))
+
+
+ONTOLOGY_PATTERNS: dict[str, tuple[tuple[str, str], ...]] = {
+    "disease": (
+        ("type_1_diabetes", r"\b(type 1 diabetes|t1d)\b|第一型糖尿病"),
+        ("type_2_diabetes", r"\b(type 2 diabetes|t2d)\b|第二型糖尿病"),
+        ("prediabetes", r"\bprediabetes\b|糖尿病前期"),
+        ("ckd", r"\b(ckd|chronic kidney disease|diabetic kidney disease|dkd|renal impairment)\b|腎"),
+        ("ascvd", r"\b(ascvd|atherosclerotic cardiovascular disease|coronary|stroke)\b|心血管"),
+        ("heart_failure", r"\b(heart failure|hfref|hfr?ef|hfpef)\b|心衰"),
+        ("hypertension", r"\b(hypertension|blood pressure)\b|高血壓|血壓"),
+        ("dyslipidemia", r"\b(dyslipidemia|lipid|cholesterol|triglyceride)\b|血脂|膽固醇"),
+        ("obesity", r"\b(obesity|overweight|adiposity|weight management)\b|肥胖|過重"),
+        ("masld_mash", r"\b(masld|mash|nafld|nash|steatotic liver|fatty liver|steatohepatitis)\b|脂肪肝"),
+        ("retinopathy", r"\b(retinopathy|retinal|macular edema|dme|npdr|pdr)\b|視網膜|黃斑"),
+        ("neuropathy", r"\b(neuropathy|autonomic neuropathy|peripheral neuropathy)\b|神經病變"),
+        ("foot_ulcer_pad", r"\b(foot ulcer|pad|peripheral artery disease|wound|amputation)\b|足部|潰瘍|傷口"),
+    ),
+    "drug": (
+        ("metformin", r"\bmetformin\b"),
+        ("sglt2_inhibitor", r"\b(sglt2|sglt-2|empagliflozin|dapagliflozin|canagliflozin)\b"),
+        ("glp1_ra", r"\b(glp-?1|semaglutide|liraglutide|dulaglutide)\b"),
+        ("dual_gip_glp1_ra", r"\b(tirzepatide|dual gip)\b"),
+        ("insulin", r"\binsulin\b|胰島素"),
+        ("sulfonylurea", r"\b(sulfonylurea|glyburide|glipizide|glimepiride)\b"),
+        ("thiazolidinedione", r"\b(thiazolidinedione|tzd|pioglitazone)\b"),
+        ("dpp4_inhibitor", r"\b(dpp-?4|sitagliptin|linagliptin)\b"),
+        ("finerenone_ns_mra", r"\b(finerenone|nonsteroidal mra|nsmra)\b"),
+        ("acei_arb", r"\b(ace inhibitor|acei|arb|angiotensin receptor blocker)\b"),
+        ("statin", r"\bstatin\b"),
+        ("anti_vegf", r"\b(anti-?vegf|aflibercept|ranibizumab|bevacizumab)\b"),
+        ("glucagon", r"\bglucagon\b"),
+    ),
+    "test": (
+        ("a1c", r"\b(a1c|hba1c)\b"),
+        ("cgm", r"\b(cgm|continuous glucose monitoring|time in range|tir)\b|連續血糖"),
+        ("bgm_smbg", r"\b(bgm|smbg|blood glucose monitoring)\b|血糖機"),
+        ("egfr", r"\begfr\b|腎絲球|過濾率"),
+        ("uacr", r"\b(uacr|albuminuria|albumin-to-creatinine)\b|尿蛋白|白蛋白尿"),
+        ("ogtt", r"\bogtt|oral glucose tolerance\b"),
+        ("lipids", r"\b(ldl|hdl|triglyceride|lipid panel)\b"),
+        ("blood_pressure", r"\bblood pressure\b|血壓"),
+        ("bmi", r"\bbmi\b|body mass index"),
+        ("retinal_exam", r"\b(dilated eye|retinal photography|ophthalmologist|eye examination)\b|眼底"),
+        ("monofilament", r"\b(monofilament|protective sensation)\b"),
+    ),
+    "population": (
+        ("older_adults", r"\b(older adults|geriatric|frailty)\b|老人|長者|高齡"),
+        ("children_adolescents", r"\b(children|adolescents|youth|pediatric)\b|兒童|青少年"),
+        ("pregnancy", r"\b(pregnancy|gestational|preconception|postpartum)\b|懷孕|妊娠|產後"),
+        ("hospitalized", r"\b(hospital|inpatient|critical illness)\b|住院"),
+        ("perioperative", r"\b(perioperative|surgery|procedure)\b|手術"),
+        ("dialysis", r"\b(dialysis|eskd|esrd|kidney failure)\b|洗腎|透析"),
+    ),
+    "task": (
+        ("diagnosis", r"\b(diagnosis|diagnostic|criteria|classification)\b|診斷"),
+        ("screening", r"\b(screening|screen)\b|篩檢"),
+        ("treatment", r"\b(treatment|therapy|management|pharmacologic|intervention)\b|治療|處理"),
+        ("monitoring", r"\b(monitoring|follow-up|surveillance)\b|監測|追蹤"),
+        ("safety", r"\b(safety|contraindication|avoid|adverse|risk)\b|安全|禁忌|風險"),
+        ("dose_adjustment", r"\b(dose|dosage|adjustment|renal dose)\b|劑量"),
+        ("target", r"\b(goal|target)\b|目標"),
+        ("staging", r"\b(staging|stage|severity|mild|moderate|severe|classification)\b|分期|分級|嚴重度"),
+    ),
+}
+
+
+def ontology_metadata_tags(haystack: str) -> list[str]:
+    tags: list[str] = []
+    for category, entries in ONTOLOGY_PATTERNS.items():
+        for name, pattern in entries:
+            if re.search(pattern, haystack, flags=re.I):
+                tags.append(f"ontology:{category}:{name}")
+    if re.search(r"[<>≤≥=]\s*\d|\b\d+(?:\.\d+)?\s*(?:%|mg/dl|mmol/l|mg/g|ml/min)\b", haystack, flags=re.I):
+        tags.append("ontology:value:numeric_cutoff")
+    if re.search(r"\begfr\b.{0,40}[<>≤≥=]?\s*\d+|[<>≤≥=]\s*\d+.{0,40}\begfr\b", haystack, flags=re.I):
+        tags.append("ontology:value:egfr_cutoff")
+    if re.search(r"\b(uacr|albuminuria)\b.{0,40}[<>≤≥=]?\s*\d+|[<>≤≥=]\s*\d+.{0,40}\b(uacr|albuminuria)\b", haystack, flags=re.I):
+        tags.append("ontology:value:uacr_cutoff")
+    if re.search(r"\b(a1c|hba1c)\b.{0,40}[<>≤≥=]?\s*\d+|[<>≤≥=]\s*\d+.{0,40}\b(a1c|hba1c)\b", haystack, flags=re.I):
+        tags.append("ontology:value:a1c_cutoff")
+    return tags
 
 
 def structured_metadata(
@@ -1235,6 +1522,7 @@ def structured_metadata(
     for tag, pattern in clinical_patterns.items():
         if re.search(pattern, haystack, flags=re.I):
             tags.append(tag)
+    tags.extend(ontology_metadata_tags(haystack))
 
     return tuple(dedupe_terms(tags))
 

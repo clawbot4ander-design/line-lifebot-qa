@@ -16,7 +16,7 @@ Obsidian/Google Drive archiving, image generation, and audio generation.
 ```bash
 LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
-APP_VERSION=2026-05-01-guideline-index-v20
+APP_VERSION=2026-05-01-dense-ontology-v21
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -53,6 +53,11 @@ LINE_KNOWLEDGE_PARENT_CONTEXT_CHARS=900
 LINE_KNOWLEDGE_PARENT_SECTION_CHARS=1800
 LINE_KNOWLEDGE_VECTOR_DIM=768
 LINE_KNOWLEDGE_VECTOR_WEIGHT=0.55
+LINE_DENSE_EMBEDDING_ENABLED=0
+LINE_DENSE_EMBEDDING_PROVIDER=gemini
+LINE_DENSE_EMBEDDING_MODEL=text-embedding-004
+LINE_DENSE_EMBEDDING_CACHE=/tmp/line_lifebot_dense_embeddings.jsonl
+LINE_DENSE_EMBEDDING_WEIGHT=1.15
 LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
 LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
 LINE_KNOWLEDGE_MAX_SNIPPETS=5
@@ -62,7 +67,7 @@ LINE_KNOWLEDGE_EXCERPT_CHARS=900
 Minimum variables to add or verify in Zeabur:
 
 ```bash
-APP_VERSION=2026-05-01-guideline-index-v20
+APP_VERSION=2026-05-01-dense-ontology-v21
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -215,7 +220,7 @@ Per message, the flow is:
    English terms, abbreviations, section words, and evidence targets.
 3. Search the mounted guideline Markdown files with hierarchical hybrid
    retrieval: multi-query BM25-style scoring, local hashed vector scoring,
-   source-aware scoring, chapter/section map chunks, recommendation chunks,
+   optional dense embedding scoring, source-aware scoring, chapter/section map chunks, recommendation chunks,
    section-aware scoring, and structured metadata tags
    such as source, year, ADA chapter, recommendation id/grade, table row type, CKD/eGFR/UACR, medication,
    MASLD/MASH, pregnancy, older adults, and hospital/perioperative context.
@@ -296,7 +301,8 @@ LINE_KEYWORD_PATHS=/app/data/keywords
 ```
 
 The health check reports `knowledge.keyword_files`, `knowledge.keyword_entries`,
-`knowledge.metadata_tagged_chunks`, and `knowledge.vector_index_chunks` so
+`knowledge.metadata_tagged_chunks`, `knowledge.ontology_tagged_chunks`,
+`knowledge.vector_index_chunks`, and `knowledge.dense_vector_index_chunks` so
 deployment can verify the modules and hybrid retrieval index are loaded.
 
 ## Debug Search
@@ -449,7 +455,7 @@ The health check should include:
 
 ```json
 {
-  "app_version": "2026-05-01-guideline-index-v20",
+  "app_version": "2026-05-01-dense-ontology-v21",
   "llm_provider": "gemini",
   "model": "gemini-3.1-flash-lite-preview",
   "features": {
@@ -473,6 +479,8 @@ The health check should include:
     "intent_query_variants": true,
     "clinical_concept_routing": true,
     "metadata_indexing": true,
+    "automatic_ontology_extraction": true,
+    "dense_embedding_index": true,
     "coverage_aware_retrieval": true,
     "mmr_style_diversity": true,
     "local_coverage_answerability": true,
