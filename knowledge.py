@@ -444,10 +444,32 @@ def knowledge_dir() -> Path:
 
 def knowledge_dirs() -> list[Path]:
     raw = os.getenv("LINE_KNOWLEDGE_DIRS")
+    legacy_dir = os.getenv("LINE_KNOWLEDGE_DIR")
     if raw is None:
-        legacy_dir = os.getenv("LINE_KNOWLEDGE_DIR")
-        raw = legacy_dir if legacy_dir else DEFAULT_KNOWLEDGE_DIRS
-    dirs = [Path(part.strip()).expanduser() for part in re.split(r"[,;\n]+", raw) if part.strip()]
+        raw = DEFAULT_KNOWLEDGE_DIRS
+    raw_parts = [part.strip() for part in re.split(r"[,;\n]+", raw) if part.strip()]
+    if legacy_dir and legacy_dir.strip().lower() not in {"", "0", "false", "no", "off"}:
+        legacy_path = Path(legacy_dir.strip()).expanduser()
+        raw_parts.insert(0, str(legacy_path))
+        if legacy_path.name.lower() in {"adaguidelines", "guidelines"}:
+            parent = legacy_path.parent
+            raw_parts.extend(
+                [
+                    str(parent / "guidelines"),
+                    str(parent / "adaguidelines"),
+                    str(parent / "kdigoguidelines"),
+                    str(parent / "aaceguidelines"),
+                ]
+            )
+
+    dirs: list[Path] = []
+    seen: set[str] = set()
+    for part in raw_parts:
+        path = Path(part).expanduser()
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            dirs.append(path)
     return dirs or [Path(DEFAULT_KNOWLEDGE_DIR).expanduser()]
 
 
@@ -494,7 +516,7 @@ def guideline_source_label(source_name: str, text: str = "") -> str:
     if "kdigo" in lower:
         if "2026" in lower and ("public review" in lower or "draft" in lower):
             return "KDIGO 2026 Diabetes and CKD Guideline Update (Public Review Draft)"
-        if "2024" in lower and "ckd" in lower:
+        if "2024" in lower and ("ckd" in lower or "chronic kidney disease" in lower):
             return "KDIGO 2024 Clinical Practice Guideline for CKD"
         if "2022" in lower and ("diabetes" in lower or "ckd" in lower):
             return "KDIGO 2022 Clinical Practice Guideline for Diabetes Management in CKD"
