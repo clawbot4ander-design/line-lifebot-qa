@@ -12,7 +12,11 @@ from typing import Iterable
 
 
 DEFAULT_KNOWLEDGE_DIR = os.getenv("LINE_KNOWLEDGE_DIR", "/app/data/guidelines")
-DEFAULT_KNOWLEDGE_DIRS = "/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines"
+DEFAULT_KNOWLEDGE_DIRS = (
+    "/app/data,"
+    "/app/data/ada,/app/data/aace,/app/data/kdigo,"
+    "/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines"
+)
 DEFAULT_EXTRA_KNOWLEDGE_PATHS = ""
 
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9+-]*|\d+(?:\.\d+)?|[\u4e00-\u9fff]{1,4}")
@@ -287,7 +291,7 @@ class KnowledgeBase:
     def _chunks_from_file(self, path: Path) -> list[KnowledgeChunk]:
         text = path.read_text(encoding="utf-8", errors="ignore")
         title = path.stem
-        source_label = guideline_source_label(path.name, text)
+        source_label = guideline_source_label(str(path), text)
         current_section = ""
         blocks: list[tuple[str, list[str]]] = []
         section_lines: list[str] = []
@@ -361,14 +365,14 @@ class KnowledgeBase:
                 scored.append((score, chunk))
         scored.sort(key=lambda item: item[0], reverse=True)
 
-        hits: list[KnowledgeHit] = []
+        raw_hits: list[KnowledgeHit] = []
         seen_sources: set[tuple[str, ...]] = set()
         for score, chunk in scored:
             key = chunk_dedup_key(chunk)
             if key in seen_sources:
                 continue
             seen_sources.add(key)
-            hits.append(
+            raw_hits.append(
                 KnowledgeHit(
                     source=chunk.source,
                     source_label=chunk.source_label,
@@ -379,9 +383,9 @@ class KnowledgeBase:
                     score=score,
                 )
             )
-            if len(hits) >= limit:
+            if len(raw_hits) >= max(limit * 4, limit + 20):
                 break
-        return hits
+        return source_balanced_hits(raw_hits, limit)
 
     def search_multi(self, query: str, limit: int = 3, excerpt_chars: int = 520) -> list[KnowledgeHit]:
         variants = query_variant_specs(query)
@@ -456,6 +460,9 @@ def knowledge_dirs() -> list[Path]:
             raw_parts.extend(
                 [
                     str(parent),
+                    str(parent / "ada"),
+                    str(parent / "aace"),
+                    str(parent / "kdigo"),
                     str(parent / "guidelines"),
                     str(parent / "adaguidelines"),
                     str(parent / "kdigoguidelines"),
@@ -472,6 +479,15 @@ def knowledge_dirs() -> list[Path]:
             seen.add(key)
             dirs.append(path)
     return dirs or [Path(DEFAULT_KNOWLEDGE_DIR).expanduser()]
+
+
+def standard_guideline_dirs() -> dict[str, str]:
+    return {
+        "ADA": "/app/data/ada 或 /app/data/adaguidelines",
+        "AACE": "/app/data/aace 或 /app/data/aaceguidelines",
+        "KDIGO": "/app/data/kdigo 或 /app/data/kdigoguidelines",
+        "Shared": "/app/data 或 /app/data/guidelines",
+    }
 
 
 def extra_knowledge_paths() -> list[Path]:
@@ -757,10 +773,21 @@ def knowledge_status() -> dict[str, object]:
     extras = extra_knowledge_paths()
     extra_existing = [path for path in extras if path.exists() and path.is_file()]
     dir_file_count = sum(len(list(root.rglob("*.md"))) for root in roots if root.exists() and root.is_dir())
+    loaded_files_by_source: dict[str, int] = {}
+    loaded_dirs_by_source: dict[str, list[str]] = {}
+    if kb:
+        for path in kb.source_files:
+            label = guideline_source_label(str(path), path.read_text(encoding="utf-8", errors="ignore")[:5000])
+            loaded_files_by_source[label] = loaded_files_by_source.get(label, 0) + 1
+            dir_value = str(path.parent)
+            loaded_dirs_by_source.setdefault(label, [])
+            if dir_value not in loaded_dirs_by_source[label]:
+                loaded_dirs_by_source[label].append(dir_value)
     return {
         "enabled": knowledge_enabled(),
         "dir": str(roots[0]) if roots else "",
         "dirs": [str(root) for root in roots],
+        "recommended_dirs": standard_guideline_dirs(),
         "extra_paths": [str(path) for path in extras],
         "available": bool(kb),
         "strict": knowledge_strict_enabled(),
@@ -769,6 +796,8 @@ def knowledge_status() -> dict[str, object]:
         "dir_files": dir_file_count,
         "extra_files": len(extra_existing),
         "sources": sorted({chunk.source_label for chunk in kb.chunks}) if kb else [],
+        "source_file_counts": loaded_files_by_source,
+        "source_dirs": loaded_dirs_by_source,
     }
 
 
@@ -937,7 +966,7 @@ def coverage_rerank_hits(query: str, hits: list[KnowledgeHit], limit: int) -> li
     if not hits:
         return []
 
-    sorted_hits = sorted(hits, key=lambda hit: hit.score, reverse=True)
+    sorted_hits = source_balanced_hits(sorted(hits, key=lambda hit: hit.score, reverse=True), max(limit * 3, limit))
     target_facets = required_facets(query)
     selected: list[KnowledgeHit] = []
     covered: set[str] = set()
@@ -983,6 +1012,38 @@ def coverage_rerank_hits(query: str, hits: list[KnowledgeHit], limit: int) -> li
         covered.update(hit_facets(chosen))
 
     return selected
+
+
+def source_balanced_hits(hits: list[KnowledgeHit], limit: int) -> list[KnowledgeHit]:
+    if len(hits) <= limit:
+        return hits
+
+    quota = max(1, int(os.getenv("LINE_KNOWLEDGE_SOURCE_MIN_CANDIDATES", "2")))
+    selected: list[KnowledgeHit] = []
+    selected_keys: set[tuple[str, ...]] = set()
+    by_source: dict[str, list[KnowledgeHit]] = {}
+    for hit in hits:
+        by_source.setdefault(hit.source_label, []).append(hit)
+
+    for source in sorted(by_source, key=lambda key: by_source[key][0].score, reverse=True):
+        for hit in by_source[source][:quota]:
+            key = hit_dedup_key(hit)
+            if key not in selected_keys:
+                selected.append(hit)
+                selected_keys.add(key)
+            if len(selected) >= limit:
+                return sorted(selected, key=lambda item: item.score, reverse=True)
+
+    for hit in hits:
+        key = hit_dedup_key(hit)
+        if key in selected_keys:
+            continue
+        selected.append(hit)
+        selected_keys.add(key)
+        if len(selected) >= limit:
+            break
+
+    return sorted(selected, key=lambda item: item.score, reverse=True)
 
 
 def required_facets(query: str) -> set[str]:

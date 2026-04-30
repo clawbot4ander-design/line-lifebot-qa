@@ -35,7 +35,7 @@ LINE_CONTEXT_TTL_SECONDS=43200
 DATABASE_URL=postgresql://...
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIRS=/app/data,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIRS=/app/data,/app/data/ada,/app/data/aace,/app/data/kdigo,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
 LINE_KNOWLEDGE_DIR=/app/data/guidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_KNOWLEDGE_PARENT_CONTEXT_CHARS=900
@@ -57,7 +57,7 @@ LINE_CONTEXT_ENABLED=1
 LINE_SESSION_SCOPE=user
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIRS=/app/data,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIRS=/app/data,/app/data/ada,/app/data/aace,/app/data/kdigo,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
 LINE_KNOWLEDGE_DIR=/app/data/guidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_QUERY_PLANNING_ENABLED=1
@@ -82,6 +82,10 @@ long-term user memory.
 Default source inside Zeabur/container:
 
 ```text
+/app/data
+/app/data/ada
+/app/data/aace
+/app/data/kdigo
 /app/data/guidelines
 /app/data/adaguidelines
 /app/data/kdigoguidelines
@@ -93,11 +97,12 @@ Useful settings:
 ```bash
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIRS=/app/data,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIRS=/app/data,/app/data/ada,/app/data/aace,/app/data/kdigo,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
 LINE_KNOWLEDGE_DIR=/app/data/guidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_KNOWLEDGE_CHUNK_CHARS=1800
 LINE_KNOWLEDGE_PARENT_CONTEXT_CHARS=900
+LINE_KNOWLEDGE_SOURCE_MIN_CANDIDATES=2
 LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
 LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
 LINE_KNOWLEDGE_MAX_SNIPPETS=5
@@ -116,15 +121,16 @@ have permission to redistribute them. Recommended deployment:
 
 1. In Zeabur, create or attach a Volume for this service.
 2. Mount it at `/app/data`.
-3. Put guideline Markdown files under `/app/data/guidelines`, or split them into
-   folders such as `/app/data/adaguidelines`, `/app/data/kdigoguidelines`, and
-   `/app/data/aaceguidelines`.
+3. Prefer splitting guideline Markdown files into three source folders:
+   `/app/data/ada`, `/app/data/aace`, and `/app/data/kdigo`. Legacy folders
+   `/app/data/adaguidelines`, `/app/data/aaceguidelines`, and
+   `/app/data/kdigoguidelines` are still scanned.
 4. Set:
 
 ```bash
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIRS=/app/data,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIRS=/app/data,/app/data/ada,/app/data/aace,/app/data/kdigo,/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 ```
 
@@ -184,9 +190,9 @@ Per message, the flow is:
    context so medication tables, eGFR thresholds, contraindications, footnotes,
    and dosing/use considerations can rank independently without losing their
    guideline context.
-5. Merge candidates with coverage-aware and MMR-style selection so complementary
-   evidence facets, sources, and sections are less likely to be crowded out by
-   repeated snippets from one chapter.
+5. Merge candidates with source-balanced, coverage-aware, and MMR-style
+   selection so KDIGO/AACE snippets are less likely to be crowded out by repeated
+   ADA chapter snippets.
 6. Retrieve a candidate pool, then ask the configured LLM to rerank only those candidates
    using the clinical intent JSON and decide whether the snippets cover all core
    concepts in the question.
@@ -306,6 +312,7 @@ The health check should include:
     "ada_only_sources": false,
     "multi_guideline_sources": true,
     "source_aware_reranking": true,
+    "source_balanced_retrieval": true,
     "section_aware_retrieval": true,
     "table_aware_retrieval": true,
     "multi_query_retrieval": true,

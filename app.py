@@ -1252,6 +1252,7 @@ def health() -> dict[str, Any]:
             "ada_only_sources": False,
             "multi_guideline_sources": True,
             "source_aware_reranking": True,
+            "source_balanced_retrieval": True,
             "section_aware_retrieval": True,
             "table_aware_retrieval": True,
             "multi_query_retrieval": True,
