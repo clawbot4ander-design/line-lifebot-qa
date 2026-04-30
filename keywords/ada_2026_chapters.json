@@ -141,10 +141,11 @@
     },
     {
       "id": "ada_s016_hospital_care",
-      "triggers": ["S16", "section 16", "dc26s016", "住院", "開刀", "手術", "禁食", "病房", "ICU", "hospital", "inpatient", "perioperative", "NPO"],
-      "expansions": ["dc26s016", "section 16", "Diabetes Care in the Hospital", "hospital care", "inpatient", "critical illness", "noncritical illness", "ICU", "perioperative", "surgery", "NPO", "insulin", "glucose target", "hypoglycemia", "hyperglycemia", "DKA", "HHS", "SGLT2 inhibitor hold", "transition of care"],
+      "triggers": ["S16", "section 16", "dc26s016", "住院", "住院高血糖", "類固醇", "開刀", "手術", "禁食", "病房", "ICU", "hospital", "inpatient", "perioperative", "NPO", "glucocorticoid", "steroid", "corticosteroid"],
+      "expansions": ["dc26s016", "section 16", "Diabetes Care in the Hospital", "hospital care", "inpatient", "critical illness", "noncritical illness", "ICU", "perioperative", "surgery", "NPO", "insulin", "glucose target", "hypoglycemia", "hyperglycemia", "glucocorticoid therapy", "steroid-induced hyperglycemia", "corticosteroid", "prednisone", "prednisolone", "dexamethasone", "NPH insulin", "basal insulin", "prandial insulin", "correction insulin", "point-of-care blood glucose monitoring", "DKA", "HHS", "SGLT2 inhibitor hold", "transition of care"],
       "variant_queries": [
         "ADA section 16 dc26s016 diabetes care hospital inpatient ICU critical illness noncritical illness glucose target insulin",
+        "ADA section 16 dc26s016 glucocorticoid therapy hospitalized hyperglycemia NPH insulin prednisone prednisolone dexamethasone basal insulin prandial correction insulin point-of-care blood glucose monitoring",
         "perioperative surgery NPO hypoglycemia hyperglycemia DKA HHS SGLT2 inhibitor hold transition of care"
       ]
     },

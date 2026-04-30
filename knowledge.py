@@ -36,6 +36,20 @@ QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "血糖": ("glucose", "glycemic", "hyperglycemia", "hypoglycemia", "blood glucose"),
     "低血糖": ("hypoglycemia", "glucagon", "level 1", "level 2", "level 3"),
     "高血糖": ("hyperglycemia", "glucose", "DKA", "HHS", "ketone"),
+    "類固醇": (
+        "glucocorticoid",
+        "glucocorticoid therapy",
+        "steroid-induced hyperglycemia",
+        "corticosteroid",
+        "prednisone",
+        "prednisolone",
+        "dexamethasone",
+        "NPH insulin",
+        "basal insulin",
+        "prandial insulin",
+        "correction insulin",
+        "point-of-care blood glucose monitoring",
+    ),
     "HHNK": ("HHS", "hyperosmolar hyperglycemic state", "hyperglycemic hyperosmolar state", "hyperglycemic crises", "DKA", "intravenous fluids", "insulin", "electrolytes"),
     "hhnk": ("HHS", "hyperosmolar hyperglycemic state", "hyperglycemic hyperosmolar state", "hyperglycemic crises", "DKA", "intravenous fluids", "insulin", "electrolytes"),
     "高滲透壓": ("HHS", "hyperosmolar hyperglycemic state", "hyperglycemic hyperosmolar state", "hyperglycemic crises", "serum osmolality", "intravenous fluids"),
@@ -120,7 +134,18 @@ QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "妊娠糖尿病": ("gestational diabetes mellitus", "GDM", "screening", "diagnosis", "OGTT", "24-28 weeks"),
     "兒童": ("children", "adolescents", "pediatric", "youth"),
     "老人": ("older adults", "geriatric", "frailty"),
-    "住院": ("hospital", "inpatient", "admission"),
+    "住院": ("hospital", "inpatient", "admission", "glucocorticoid therapy", "inpatient hyperglycemia"),
+    "住院高血糖": (
+        "hospital hyperglycemia",
+        "inpatient hyperglycemia",
+        "glucocorticoid therapy",
+        "steroid-induced hyperglycemia",
+        "NPH insulin",
+        "basal insulin",
+        "prandial insulin",
+        "correction insulin",
+        "point-of-care blood glucose monitoring",
+    ),
     "高血糖急症": ("hyperglycemic crises", "DKA", "diabetic ketoacidosis", "HHS", "hyperosmolar hyperglycemic state", "diagnostic criteria", "intravenous fluids", "insulin", "electrolytes"),
     "篩檢": ("screening", "diagnosis", "A1C", "fasting plasma glucose"),
     "診斷": ("diagnosis", "classification", "A1C", "OGTT", "diagnostic criteria"),
@@ -541,6 +566,28 @@ class KnowledgeBase:
             priority_queries = (
                 "dc26s016 Diabetic Ketoacidosis and Hyperglycemic Hyperosmolar State recommendation 16.16 HHS DKA intravenous fluids insulin electrolytes",
                 "dc26s016 Table 16.1 Diagnostic criteria for DKA and HHS ketones pH bicarbonate osmolality",
+            )
+            for priority_query in priority_queries:
+                for rank, hit in enumerate(self.search(priority_query, limit=max(limit, 10), excerpt_chars=excerpt_chars), start=1):
+                    key = hit_dedup_key(hit)
+                    fused_score = hit.score * 50.0 + 10000.0 / (rank + 1)
+                    existing = candidates.get(key)
+                    if not existing or fused_score > existing.score:
+                        candidates[key] = KnowledgeHit(
+                            source=hit.source,
+                            source_label=hit.source_label,
+                            title=hit.title,
+                            section=hit.section,
+                            chunk_type=hit.chunk_type,
+                            excerpt=hit.excerpt,
+                            parent_excerpt=hit.parent_excerpt,
+                            metadata=hit.metadata,
+                            score=fused_score,
+                        )
+        if "hospital_steroid_hyperglycemia" in query_concepts(query, query.lower()):
+            priority_queries = (
+                "dc26s016 glucocorticoid therapy hospitalized hyperglycemia NPH insulin prednisone prednisolone dexamethasone basal insulin prandial correction insulin point-of-care blood glucose monitoring",
+                "dc26s009 recommendation 9.36 glucocorticoid treatment plan steroid-induced hyperglycemia NPH morning dose insulin frequent reassessment",
             )
             for priority_query in priority_queries:
                 for rank, hit in enumerate(self.search(priority_query, limit=max(limit, 10), excerpt_chars=excerpt_chars), start=1):
@@ -1478,6 +1525,7 @@ ONTOLOGY_PATTERNS: dict[str, tuple[tuple[str, str], ...]] = {
         ("statin", r"\bstatin\b"),
         ("anti_vegf", r"\b(anti-?vegf|aflibercept|ranibizumab|bevacizumab)\b"),
         ("glucagon", r"\bglucagon\b"),
+        ("glucocorticoid", r"\b(glucocorticoid|steroid|corticosteroid|prednisone|prednisolone|dexamethasone)\b|類固醇"),
     ),
     "test": (
         ("a1c", r"\b(a1c|hba1c)\b"),
@@ -1580,6 +1628,7 @@ def structured_metadata(
         "metformin": r"\bmetformin\b",
         "insulin": r"\binsulin\b|胰島素",
         "hypoglycemia": r"\bhypoglycemia\b|低血糖",
+        "steroid_hyperglycemia": r"\b(glucocorticoid|steroid-induced hyperglycemia|steroid.*hyperglycemia|corticosteroid|prednisone|prednisolone|dexamethasone|nph insulin)\b|類固醇",
         "ascvd": r"\bascvd|cardiovascular disease|coronary|stroke|peripheral artery\b|心血管",
         "heart_failure": r"\bheart failure|hfr?ef|hfpef\b|心衰",
         "hypertension": r"\bhypertension|blood pressure\b|血壓",
@@ -1665,6 +1714,22 @@ def query_variant_specs(query: str) -> list[QueryVariant]:
                     "hhs_treatment",
                     f"{query} ADA recommendation 16.16 DKA HHS treatment intravenous fluids insulin electrolytes potassium monitoring transition subcutaneous insulin precipitating cause Figure 16.1",
                     1.02,
+                ),
+            ]
+        )
+    steroid_hospital_query = "hospital_steroid_hyperglycemia" in query_concepts(query, query_lower)
+    if steroid_hospital_query:
+        variants.extend(
+            [
+                QueryVariant(
+                    "steroid_hospital_s16",
+                    f"{query} ADA section 16 dc26s016 Diabetes Care in the Hospital glucocorticoid therapy steroid-induced hyperglycemia hospitalized NPH insulin prednisone prednisolone dexamethasone basal insulin prandial correction insulin point-of-care blood glucose monitoring",
+                    1.02,
+                ),
+                QueryVariant(
+                    "steroid_hospital_s9",
+                    f"{query} ADA section 9 recommendation 9.36 glucocorticoid treatment plan steroid-induced hyperglycemia NPH morning dosing insulin frequent reassessment",
+                    0.98,
                 ),
             ]
         )
@@ -1811,6 +1876,21 @@ def concept_route_variants(query: str, query_lower: str) -> list[QueryVariant]:
                 ),
             ]
         )
+    if "hospital_steroid_hyperglycemia" in concepts:
+        variants.extend(
+            [
+                QueryVariant(
+                    "concept_hospital_steroid_s16",
+                    f"{query} ADA section 16 dc26s016 Diabetes Care in the Hospital glucocorticoid therapy hospitalized hyperglycemia NPH insulin prednisone prednisolone dexamethasone basal insulin prandial correction insulin point-of-care blood glucose monitoring",
+                    0.98,
+                ),
+                QueryVariant(
+                    "concept_hospital_steroid_s9",
+                    f"{query} ADA section 9 recommendation 9.36 glucocorticoid treatment plan steroid-induced hyperglycemia NPH morning dose insulin frequent reassessment",
+                    0.92,
+                ),
+            ]
+        )
     return variants
 
 
@@ -1899,6 +1979,28 @@ CLINICAL_CONCEPT_PROFILES: dict[str, dict[str, list[str]]] = {
             "hyperglycemic hyperosmolar state HHS diagnosis treatment fluids insulin electrolytes osmolality potassium transition subcutaneous insulin",
         ],
     },
+    "hospital_steroid_hyperglycemia": {
+        "concepts": ["glucocorticoid-associated hyperglycemia", "steroid-induced hyperglycemia", "inpatient hyperglycemia"],
+        "target_chapters": ["ADA S16 Diabetes Care in the Hospital", "ADA S9 Pharmacologic Approaches"],
+        "evidence_targets": [
+            "glucocorticoid type and duration",
+            "NPH insulin with prednisone or prednisolone",
+            "long-acting basal insulin for dexamethasone, long-acting glucocorticoids, multiple daily doses, or continuous glucocorticoid use",
+            "prandial and correction insulin increases for higher-dose glucocorticoids",
+            "daily adjustment based on glycemia and glucocorticoid treatment plan",
+            "point-of-care blood glucose monitoring",
+            "hypoglycemia risk when glucocorticoid dose is reduced",
+        ],
+        "avoid_routes": [
+            "do not answer steroid-induced inpatient hyperglycemia from hypoglycemia treatment text alone",
+            "do not answer from generic outpatient glucose-lowering medication tables alone",
+        ],
+        "required_facets": ["hospital_context", "steroid_context", "treatment"],
+        "search_queries": [
+            "ADA section 16 dc26s016 glucocorticoid therapy hospitalized hyperglycemia NPH insulin prednisone prednisolone dexamethasone basal insulin prandial correction insulin point-of-care blood glucose monitoring",
+            "ADA section 9 recommendation 9.36 glucocorticoid treatment plan steroid-induced hyperglycemia NPH morning dose insulin frequent reassessment",
+        ],
+    },
 }
 
 
@@ -1921,6 +2023,8 @@ def clinical_search_brain_plan(query: str) -> dict[str, list[str]]:
         term in lower for term in ("hhnk", "hhs", "dka", "ketoacidosis", "hyperosmolar", "hyperglycemic crisis", "hyperglycemic crises")
     ):
         concepts.add("hyperglycemic_crisis")
+    if "hospital_steroid_hyperglycemia" in query_concepts(query, lower):
+        concepts.add("hospital_steroid_hyperglycemia")
 
     plan: dict[str, list[str]] = {
         "concepts": [],
@@ -1985,6 +2089,17 @@ def query_concepts(query: str, query_lower: str | None = None) -> set[str]:
         term in lower for term in ("hhnk", "hhs", "dka", "ketoacidosis", "hyperosmolar", "hyperglycemic crisis", "hyperglycemic crises")
     ):
         concepts.add("hyperglycemic_crisis")
+    steroid_context = any(term in query for term in ("類固醇",)) or any(
+        term in lower for term in ("glucocorticoid", "steroid", "corticosteroid", "prednisone", "prednisolone", "dexamethasone")
+    )
+    hospital_context = any(term in query for term in ("住院", "病房", "院內", "住院中")) or any(
+        term in lower for term in ("hospital", "inpatient", "hospitalized", "noncritical illness", "critical illness")
+    )
+    hyperglycemia_context = any(term in query for term in ("高血糖", "血糖高", "血糖升高")) or any(
+        term in lower for term in ("hyperglycemia", "glycemic management", "blood glucose")
+    )
+    if steroid_context and (hospital_context or hyperglycemia_context):
+        concepts.add("hospital_steroid_hyperglycemia")
     return concepts
 
 
@@ -2002,7 +2117,23 @@ def coverage_query_variants(query: str, query_lower: str) -> list[QueryVariant]:
     older_query = any(term in query for term in ("老人", "長者", "高齡")) or any(
         term in query_lower for term in ("older", "geriatric", "frailty")
     )
+    steroid_hospital_query = "hospital_steroid_hyperglycemia" in query_concepts(query, query_lower)
 
+    if steroid_hospital_query:
+        variants.extend(
+            [
+                QueryVariant(
+                    "coverage_steroid_hospital_s16",
+                    f"{query} ADA section 16 dc26s016 glucocorticoid therapy hospitalized hyperglycemia NPH insulin prednisone prednisolone dexamethasone basal insulin prandial correction insulin point-of-care blood glucose monitoring",
+                    0.94,
+                ),
+                QueryVariant(
+                    "coverage_steroid_hospital_s9",
+                    f"{query} ADA recommendation 9.36 glucocorticoid treatment plan steroid-induced hyperglycemia insulin NPH frequent reassessment",
+                    0.9,
+                ),
+            ]
+        )
     if kidney_query and medication_query:
         variants.extend(
             [
@@ -2202,7 +2333,7 @@ def required_facets(query: str) -> set[str]:
     ):
         facets.update({"monitoring", "technology_indication"})
     if any(term in query for term in ("藥", "用藥", "胰島素")) or any(
-        term in lower for term in ("medication", "pharmacologic", "sglt", "glp", "insulin", "metformin")
+        term in lower for term in ("medication", "pharmacologic", "sglt", "glp", "insulin", "metformin", "glucocorticoid", "steroid")
     ):
         facets.add("medication")
     if any(term in query for term in ("egfr", "門檻", "多少", "幾")) or any(
@@ -2233,6 +2364,8 @@ def required_facets(query: str) -> set[str]:
         term in lower for term in ("masld", "mash", "nafld", "nash", "steatotic liver", "steatohepatitis", "cirrhosis")
     ):
         facets.update({"liver_context", "treatment"})
+    if "hospital_steroid_hyperglycemia" in concepts:
+        facets.update({"hospital_context", "steroid_context", "treatment"})
     if "低血糖" in query or "hypoglycemia" in lower:
         facets.update({"hypoglycemia", "treatment"})
     if any(term in query for term in ("處理", "治療", "怎麼辦")) or any(term in lower for term in ("treatment", "management")):
@@ -2282,6 +2415,10 @@ def hit_facets(hit: KnowledgeHit) -> set[str]:
         facets.add("frequency")
     if re.search(r"\b(pregnancy|gestational|gdm|preconception|postpartum)\b", haystack):
         facets.add("pregnancy")
+    if re.search(r"\b(hospital|inpatient|hospitalized|diabetes care in the hospital|critical illness|noncritical illness|dc26s016)\b|住院", haystack):
+        facets.add("hospital_context")
+    if re.search(r"\b(glucocorticoid|steroid-induced hyperglycemia|steroid.*hyperglycemia|corticosteroid|prednisone|prednisolone|dexamethasone|nph insulin)\b|類固醇", haystack):
+        facets.add("steroid_context")
     if re.search(r"\b(masld|mash|nafld|nash|steatotic liver|steatohepatitis|fatty liver|cirrhosis|fibrosis|hepatic)\b", haystack):
         facets.add("liver_context")
     if "hypoglycemia" in haystack:
@@ -2425,6 +2562,7 @@ def domain_adjustment(query: str, chunk: KnowledgeChunk) -> float:
     hyperglycemic_crisis_query = any(term in query for term in ("HHNK", "高滲透壓", "高血糖高滲透壓", "高血糖急症", "酮酸", "酮酸中毒")) or any(
         term in query_lower for term in ("hhnk", "hhs", "dka", "ketoacidosis", "hyperosmolar", "hyperglycemic crisis", "hyperglycemic crises")
     )
+    steroid_hospital_query = "hospital_steroid_hyperglycemia" in query_concepts(query, query_lower)
     liver_query = any(term in query for term in ("肝", "脂肪肝", "脂肪性肝炎", "代謝性脂肪肝", "肝硬化", "肝纖維")) or any(
         term in query_lower for term in ("masld", "mash", "nafld", "nash", "steatotic liver", "steatohepatitis", "cirrhosis")
     )
@@ -2468,6 +2606,25 @@ def domain_adjustment(query: str, chunk: KnowledgeChunk) -> float:
         haystack,
     ):
         adjustment *= 4.2
+    if hyperglycemic_crisis_query and not steroid_hospital_query and re.search(
+        r"\b(glucocorticoid|steroid-induced hyperglycemia|corticosteroid|prednisone|prednisolone|dexamethasone|nph insulin)\b",
+        haystack,
+    ):
+        adjustment *= 0.25
+    if steroid_hospital_query and ("dc26s016" in haystack or "diabetes care in the hospital" in haystack):
+        adjustment *= 5.0
+    if steroid_hospital_query and ("dc26s009" in haystack or "pharmacologic approaches to glycemic treatment" in haystack):
+        adjustment *= 2.2
+    if steroid_hospital_query and re.search(
+        r"\b(glucocorticoid|steroid-induced hyperglycemia|steroid.*hyperglycemia|corticosteroid|prednisone|prednisolone|dexamethasone|nph insulin|basal insulin|prandial|correction insulin|point-of-care|poc blood glucose|frequent reassessment)\b",
+        haystack,
+    ):
+        adjustment *= 4.2
+    if steroid_hospital_query and "dc26s006" in haystack and not re.search(
+        r"\b(glucocorticoid|steroid-induced hyperglycemia|corticosteroid|prednisone|prednisolone|dexamethasone|nph insulin)\b",
+        haystack,
+    ):
+        adjustment *= 0.18
     if re.search(r"\b(recommendation|recommendations|treatment|therapy|selection|screening|diagnosis|pharmacologic|management|interventions)\b", haystack):
         adjustment *= 1.18
     if re.search(r"\b(egfr|albuminuria|uacr|mg/g|ml/min|contraindicat|avoid|dose|dosage|adjust|threshold|initiat|discontinu)\b", haystack):

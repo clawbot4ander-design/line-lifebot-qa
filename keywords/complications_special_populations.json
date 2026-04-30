@@ -69,10 +69,11 @@
     },
     {
       "id": "hospital_perioperative",
-      "triggers": ["住院", "開刀", "手術", "禁食", "perioperative", "hospital", "inpatient", "NPO"],
-      "expansions": ["hospital care", "inpatient", "perioperative", "surgery", "NPO", "critical illness", "noncritical illness", "insulin", "glucose target", "hypoglycemia", "hyperglycemia", "SGLT2 inhibitor hold", "metformin hold", "DKA", "transition of care"],
+      "triggers": ["住院", "住院高血糖", "病房", "類固醇", "開刀", "手術", "禁食", "perioperative", "hospital", "inpatient", "NPO", "glucocorticoid", "steroid", "corticosteroid"],
+      "expansions": ["hospital care", "inpatient", "perioperative", "surgery", "NPO", "critical illness", "noncritical illness", "insulin", "glucose target", "hypoglycemia", "hyperglycemia", "glucocorticoid therapy", "steroid-induced hyperglycemia", "corticosteroid", "prednisone", "prednisolone", "dexamethasone", "NPH insulin", "basal insulin", "prandial insulin", "correction insulin", "point-of-care blood glucose monitoring", "SGLT2 inhibitor hold", "metformin hold", "DKA", "transition of care"],
       "variant_queries": [
         "hospital inpatient diabetes glycemic management insulin glucose target critical illness noncritical illness",
+        "glucocorticoid therapy hospitalized hyperglycemia NPH insulin prednisone prednisolone dexamethasone basal insulin prandial correction insulin point-of-care blood glucose monitoring",
         "perioperative surgery NPO SGLT2 inhibitor hold metformin hold DKA transition of care"
       ]
     },

@@ -16,7 +16,7 @@ Obsidian/Google Drive archiving, image generation, and audio generation.
 ```bash
 LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
-APP_VERSION=2026-05-01-no-multiagent-hermes-brain-v24
+APP_VERSION=2026-05-01-no-multiagent-hermes-brain-v25
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -70,7 +70,7 @@ LINE_KNOWLEDGE_EXCERPT_CHARS=900
 Minimum variables to add or verify in Zeabur:
 
 ```bash
-APP_VERSION=2026-05-01-no-multiagent-hermes-brain-v24
+APP_VERSION=2026-05-01-no-multiagent-hermes-brain-v25
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -468,7 +468,7 @@ The health check should include:
 
 ```json
 {
-  "app_version": "2026-05-01-no-multiagent-hermes-brain-v24",
+  "app_version": "2026-05-01-no-multiagent-hermes-brain-v25",
   "llm_provider": "gemini",
   "model": "gemini-3.1-flash-lite-preview",
   "features": {

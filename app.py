@@ -78,7 +78,7 @@ except ModuleNotFoundError:
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
-APP_VERSION = os.getenv("APP_VERSION", "2026-05-01-no-multiagent-hermes-brain-v24")
+APP_VERSION = os.getenv("APP_VERSION", "2026-05-01-no-multiagent-hermes-brain-v25")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
@@ -889,9 +889,10 @@ def build_clinical_intent(api_key: str, user_text: str, recent_context: str) -> 
         "不要提供醫療建議，不要回答問題，不要使用模型內建醫學知識下結論。"
         "請輸出 JSON，欄位固定為："
         "clinical_intent, question_type, patient_context, concepts, target_chapters, evidence_targets, must_retrieve, required_facets, avoid_routes, answer_strategy, do_not_answer_with。"
-        "required_facets 只能使用這些值：kidney_context, medication, threshold, glycemic_target, a1c_reliability, monitoring, technology_indication, diagnosis, retinopathy_context, staging, pad_context, ascvd_context, pregnancy, hypoglycemia, treatment, foot_care, frequency, liver_context。"
+        "required_facets 只能使用這些值：kidney_context, medication, threshold, glycemic_target, a1c_reliability, monitoring, technology_indication, diagnosis, retinopathy_context, staging, pad_context, ascvd_context, pregnancy, hypoglycemia, treatment, foot_care, frequency, liver_context, hospital_context, steroid_context。"
         "若使用者用白話描述下肢動脈阻塞、腳血管塞住、跛行、下肢缺血，請理解為 PAD / lower-extremity arterial disease / ASCVD；target_chapters 應包含 ADA S10 與 ADA S12，evidence_targets 應包含 antiplatelet、aspirin/clopidogrel、rivaroxaban plus aspirin、statin/lipid、blood pressure、smoking cessation、vascular assessment/revascularization、GLP-1 RA/semaglutide limb outcome evidence；avoid_routes 要說不要只用一般降血糖藥物表回答。"
         "若使用者提到 HHNK、HHS、高滲透壓、高血糖高滲透壓、酮酸中毒、酮酸、DKA 或高血糖急症，請理解為 hyperglycemic crises；target_chapters 應包含 ADA S16 Diabetes Care in the Hospital 和 ADA S6；evidence_targets 應包含 DKA/HHS diagnostic criteria、Table 16.1、intravenous fluids、insulin、electrolytes、potassium/osmolality/ketones/pH/bicarbonate、transition to subcutaneous insulin、precipitating cause；avoid_routes 要說不要從 GDM 或一般 outpatient diagnosis criteria 回答。"
+        "若使用者提到住院/病房/inpatient/hospitalized 加上類固醇/glucocorticoid/steroid/corticosteroid/prednisone/prednisolone/dexamethasone 與高血糖，請理解為 glucocorticoid-associated inpatient hyperglycemia；target_chapters 應包含 ADA S16 和 ADA S9；evidence_targets 應包含 NPH insulin with prednisone/prednisolone、basal insulin for dexamethasone or continuous glucocorticoids、prandial/correction insulin increases、daily adjustment、POC blood glucose monitoring；required_facets 應包含 hospital_context, steroid_context, treatment。"
         "若問題是特定 eGFR 數值下的用藥/合併用藥，question_type 必須是 medication_threshold_comparison，"
         "must_retrieve 要包含 SGLT2 eGFR threshold、metformin eGFR limitation、GLP-1 RA in CKD、finerenone/nsMRA eGFR threshold、advanced CKD hypoglycemia/insulin safety。"
         "answer_strategy 要明確說明：用檢索到的 eGFR 門檻與使用者 eGFR 數值比較，不需要文件逐字出現 exact eGFR 數字。"
@@ -951,6 +952,7 @@ def build_retrieval_query(
         "若問題提到脂肪肝、脂肪性肝炎、MASLD、MASH、NAFLD、NASH、肝硬化或肝纖維化，請加入 MASLD、MASH、NAFLD、NASH、steatotic liver disease、steatohepatitis、fibrosis、cirrhosis、GLP-1 receptor agonist、pioglitazone、tirzepatide、weight loss。"
         "若 concepts 或問題指向 PAD、peripheral artery disease、下肢動脈阻塞、下肢缺血或跛行，請加入 ADA section 10、ADA section 12、PAD、lower-extremity arterial disease、ASCVD、antiplatelet、aspirin、clopidogrel、rivaroxaban、statin、lipid-lowering、blood pressure、smoking cessation、ABI、toe pressure、revascularization、semaglutide、STRIDE、limb outcomes；並避免只搜尋 glucose-lowering medication table。"
         "若問題提到 HHNK、HHS、高滲透壓、高血糖高滲透壓、酮酸中毒、酮酸、DKA 或高血糖急症，請加入 ADA section 16、dc26s016、hyperglycemic crises、DKA、diabetic ketoacidosis、HHS、hyperosmolar hyperglycemic state、diagnostic criteria、Table 16.1、intravenous fluids、insulin、electrolytes、potassium、osmolality、ketones、pH、bicarbonate、transition to subcutaneous insulin、precipitating cause；並避免搜尋 GDM/outpatient diagnosis criteria。"
+        "若問題提到住院/病房/inpatient/hospitalized 加上類固醇/glucocorticoid/steroid/corticosteroid/prednisone/prednisolone/dexamethasone 與高血糖，請加入 ADA section 16、dc26s016、glucocorticoid therapy、steroid-induced hyperglycemia、NPH insulin、prednisone、prednisolone、dexamethasone、basal insulin、prandial insulin、correction insulin、point-of-care blood glucose monitoring、ADA section 9、recommendation 9.36、frequent reassessment。"
         "不要新增使用者沒有問到的病情、診斷、用藥劑量或結論。"
         "只輸出 JSON，格式為：{\"search_query\":\"...\",\"keywords\":[\"...\"]}。"
     )
@@ -1010,6 +1012,8 @@ def local_evidence_coverage(
             "foot_care",
             "frequency",
             "liver_context",
+            "hospital_context",
+            "steroid_context",
         }
     )
     if not required:
@@ -1082,6 +1086,8 @@ def recursive_coverage_queries(
         "foot_care": f"{user_text} foot care neuropathy monofilament ulcer peripheral artery disease screening",
         "frequency": f"{user_text} screening frequency annually every year follow-up interval",
         "liver_context": f"{user_text} MASLD MASH NAFLD NASH steatotic liver disease diabetes obesity fibrosis cirrhosis",
+        "hospital_context": f"{user_text} ADA section 16 dc26s016 Diabetes Care in the Hospital inpatient hospitalized hyperglycemia insulin point-of-care blood glucose monitoring",
+        "steroid_context": f"{user_text} glucocorticoid therapy steroid-induced hyperglycemia corticosteroid prednisone prednisolone dexamethasone NPH insulin basal insulin prandial correction insulin ADA section 16 ADA recommendation 9.36",
     }
     for facet in sorted(missing):
         query = facet_queries.get(facet)
@@ -1102,6 +1108,16 @@ def recursive_coverage_queries(
             [
                 f"{user_text} MASLD NAFLD metabolic dysfunction-associated steatotic liver disease diabetes obesity weight loss",
                 f"{user_text} MASH NASH steatohepatitis GLP-1 receptor agonist pioglitazone tirzepatide cirrhosis fibrosis",
+            ]
+        )
+    if "hospital_steroid_hyperglycemia" in " ".join(json_list((clinical_intent or {}).get("concepts"))).lower() or (
+        ("類固醇" in user_text or "steroid" in lower or "glucocorticoid" in lower)
+        and ("住院" in user_text or "hospital" in lower or "inpatient" in lower)
+    ):
+        queries.extend(
+            [
+                f"{user_text} ADA section 16 dc26s016 glucocorticoid therapy hospitalized hyperglycemia NPH insulin prednisone prednisolone dexamethasone basal insulin prandial correction insulin point-of-care blood glucose monitoring",
+                f"{user_text} ADA section 9 recommendation 9.36 glucocorticoid treatment plan steroid-induced hyperglycemia insulin frequent reassessment",
             ]
         )
 

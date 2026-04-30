@@ -126,12 +126,40 @@ HHNK → HHS / hyperosmolar hyperglycemic state
 高血糖急症 → hyperglycemic crises
 ```
 
+## 住院類固醇高血糖例子
+
+對「住院中因類固醇造成高血糖」、「prednisone 血糖升高」、「dexamethasone inpatient hyperglycemia」類問題，brain plan 會導向：
+
+```text
+concept:
+- glucocorticoid-associated hyperglycemia
+- steroid-induced hyperglycemia
+- inpatient hyperglycemia
+
+target_chapters:
+- ADA S16 Diabetes Care in the Hospital
+- ADA S9 Pharmacologic Approaches
+
+evidence_targets:
+- glucocorticoid type and duration
+- NPH insulin with prednisone / prednisolone
+- basal insulin for dexamethasone, long-acting, multiple daily, or continuous glucocorticoids
+- prandial / correction insulin increases for higher-dose glucocorticoids
+- daily adjustment based on glycemia and the glucocorticoid plan
+- point-of-care blood glucose monitoring
+- hypoglycemia risk when steroid dose is reduced
+
+avoid_routes:
+- do not answer from hypoglycemia treatment text alone
+- do not answer from generic outpatient glucose-lowering medication tables alone
+```
+
 ## 目前版本
 
 目前版本：
 
 ```text
-2026-05-01-no-multiagent-hermes-brain-v24
+2026-05-01-no-multiagent-hermes-brain-v25
 ```
 
 相關 feature flag：
