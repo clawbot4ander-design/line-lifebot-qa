@@ -83,6 +83,12 @@ QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "心衰竭": ("heart failure", "HF", "HFrEF", "HFpEF", "heart failure hospitalization"),
     "血壓": ("blood pressure", "hypertension"),
     "膽固醇": ("lipid", "cholesterol", "statin", "triglyceride"),
+    "肝": ("liver", "hepatic", "steatotic liver disease", "MASLD", "MASH", "NAFLD", "NASH"),
+    "脂肪肝": ("MASLD", "metabolic dysfunction-associated steatotic liver disease", "NAFLD", "fatty liver"),
+    "代謝性脂肪肝": ("MASLD", "metabolic dysfunction-associated steatotic liver disease", "NAFLD"),
+    "脂肪性肝炎": ("MASH", "metabolic dysfunction-associated steatohepatitis", "NASH", "steatohepatitis"),
+    "肝炎": ("MASH", "NASH", "steatohepatitis", "liver disease"),
+    "肝硬化": ("cirrhosis", "compensated cirrhosis", "liver fibrosis", "advanced fibrosis"),
     "懷孕": ("pregnancy", "gestational", "preconception"),
     "懷孕糖尿病": ("gestational diabetes mellitus", "GDM", "screening", "diagnosis", "OGTT", "24-28 weeks"),
     "妊娠糖尿病": ("gestational diabetes mellitus", "GDM", "screening", "diagnosis", "OGTT", "24-28 weeks"),
@@ -224,6 +230,13 @@ QUERY_INTENT_VARIANTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
         (
             "obesity weight management lifestyle pharmacotherapy metabolic surgery diabetes",
             "GLP-1 dual GIP GLP-1 weight loss obesity treatment",
+        ),
+    ),
+    (
+        ("脂肪肝", "脂肪性肝炎", "代謝性脂肪肝", "肝硬化", "肝纖維", "masld", "mash", "nafld", "nash", "steatotic liver"),
+        (
+            "MASLD metabolic dysfunction-associated steatotic liver disease NAFLD diabetes treatment obesity weight loss",
+            "MASH metabolic dysfunction-associated steatohepatitis NASH GLP-1 receptor agonist pioglitazone tirzepatide cirrhosis fibrosis",
         ),
     ),
 )
@@ -940,6 +953,24 @@ def coverage_query_variants(query: str, query_lower: str) -> list[QueryVariant]:
                 0.82,
             )
         )
+    liver_query = any(term in query for term in ("脂肪肝", "脂肪性肝炎", "代謝性脂肪肝", "肝硬化", "肝纖維")) or any(
+        term in query_lower for term in ("masld", "mash", "nafld", "nash", "steatotic liver", "steatohepatitis", "cirrhosis")
+    )
+    if liver_query:
+        variants.extend(
+            [
+                QueryVariant(
+                    "coverage_liver_disease",
+                    f"{query} MASLD metabolic dysfunction-associated steatotic liver disease NAFLD diabetes obesity weight loss lifestyle",
+                    0.86,
+                ),
+                QueryVariant(
+                    "coverage_liver_treatment",
+                    f"{query} MASH metabolic dysfunction-associated steatohepatitis NASH GLP-1 receptor agonist pioglitazone tirzepatide fibrosis cirrhosis",
+                    0.84,
+                ),
+            ]
+        )
     if older_query:
         variants.append(
             QueryVariant(
@@ -1253,6 +1284,9 @@ def domain_adjustment(query: str, chunk: KnowledgeChunk) -> float:
         any(term in query for term in ("診斷", "篩檢", "標準"))
         or any(term in query_lower for term in ("diagnosis", "screening", "criteria", "ogtt"))
     )
+    liver_query = any(term in query for term in ("肝", "脂肪肝", "脂肪性肝炎", "代謝性脂肪肝", "肝硬化", "肝纖維")) or any(
+        term in query_lower for term in ("masld", "mash", "nafld", "nash", "steatotic liver", "steatohepatitis", "cirrhosis")
+    )
 
     if chunk.chunk_type == "table_row":
         adjustment *= 1.25
@@ -1268,6 +1302,10 @@ def domain_adjustment(query: str, chunk: KnowledgeChunk) -> float:
         adjustment *= float(os.getenv("LINE_KNOWLEDGE_KDIGO_CKD_MEDICATION_BOOST", "1.35"))
     if kidney_medication_query and "aace" in haystack:
         adjustment *= float(os.getenv("LINE_KNOWLEDGE_AACE_MEDICATION_BOOST", "1.25"))
+    if liver_query and re.search(r"\b(masld|mash|nafld|nash|steatotic liver|steatohepatitis|fatty liver|cirrhosis|fibrosis|hepatic)\b", haystack):
+        adjustment *= 2.4
+    if liver_query and re.search(r"\b(glp-1|pioglitazone|tirzepatide|weight loss|obesity|lifestyle)\b", haystack):
+        adjustment *= 1.45
     if glycemic_goal_query and ("glycemic goals" in haystack or "setting and modifying glycemic goals" in haystack):
         adjustment *= 2.8
     if glycemic_goal_query and ("dc26s006" in haystack or "glycemic goals, hypoglycemia" in haystack):

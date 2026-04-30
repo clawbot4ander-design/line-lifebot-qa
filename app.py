@@ -857,6 +857,7 @@ def build_retrieval_query(
         "你會收到 clinical intent JSON；請優先根據 must_retrieve、required_facets、answer_strategy 產生多面向檢索詞。"
         "若問題提到洗腎/透析/腎衰竭與血糖控制目標，請加入 dialysis、kidney failure、glycemic goals、A1C goal、A1C reliability、CGM、BGM、glycated albumin、fructosamine。"
         "若 question_type 是 medication_threshold_comparison，請加入 CKD glucose-lowering therapy、SGLT2 inhibitor eGFR threshold、metformin eGFR、GLP-1 RA CKD、finerenone nonsteroidal MRA eGFR、hypoglycemia risk advanced CKD、insulin kidney impairment。"
+        "若問題提到脂肪肝、脂肪性肝炎、MASLD、MASH、NAFLD、NASH、肝硬化或肝纖維化，請加入 MASLD、MASH、NAFLD、NASH、steatotic liver disease、steatohepatitis、fibrosis、cirrhosis、GLP-1 receptor agonist、pioglitazone、tirzepatide、weight loss。"
         "不要新增使用者沒有問到的病情、診斷、用藥劑量或結論。"
         "只輸出 JSON，格式為：{\"search_query\":\"...\",\"keywords\":[\"...\"]}。"
     )
