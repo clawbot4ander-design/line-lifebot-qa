@@ -11,7 +11,8 @@ import threading
 from typing import Iterable
 
 
-DEFAULT_KNOWLEDGE_DIR = os.getenv("LINE_KNOWLEDGE_DIR", "/app/data/adaguidelines")
+DEFAULT_KNOWLEDGE_DIR = os.getenv("LINE_KNOWLEDGE_DIR", "/app/data/guidelines")
+DEFAULT_KNOWLEDGE_DIRS = "/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines"
 DEFAULT_EXTRA_KNOWLEDGE_PATHS = ""
 
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9+-]*|\d+(?:\.\d+)?|[\u4e00-\u9fff]{1,4}")
@@ -34,6 +35,8 @@ QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "藥": ("pharmacologic", "medication", "insulin", "metformin", "GLP-1", "SGLT2"),
     "胰島素": ("insulin", "hypoglycemia", "injection"),
     "腎": ("kidney", "CKD", "albuminuria", "eGFR", "renal"),
+    "尿蛋白": ("albuminuria", "UACR", "urine albumin-to-creatinine ratio", "proteinuria"),
+    "白蛋白尿": ("albuminuria", "UACR", "urine albumin-to-creatinine ratio"),
     "腎絲球": ("eGFR", "estimated glomerular filtration rate", "GFR", "kidney function"),
     "過濾率": ("eGFR", "estimated glomerular filtration rate", "GFR", "kidney function"),
     "腎病變": ("CKD", "chronic kidney disease", "kidney outcomes", "albuminuria", "eGFR"),
@@ -72,6 +75,8 @@ QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "眼": ("retinopathy", "eye", "ophthalmologist", "retinal"),
     "腳": ("foot", "neuropathy", "ulcer", "podiatrist"),
     "心臟": ("cardiovascular", "heart", "ASCVD", "blood pressure", "lipid"),
+    "心血管": ("cardiovascular", "ASCVD", "heart failure", "MACE", "cardiorenal"),
+    "心衰竭": ("heart failure", "HF", "HFrEF", "HFpEF", "heart failure hospitalization"),
     "血壓": ("blood pressure", "hypertension"),
     "膽固醇": ("lipid", "cholesterol", "statin", "triglyceride"),
     "懷孕": ("pregnancy", "gestational", "preconception"),
@@ -85,6 +90,7 @@ QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "診斷標準": ("diagnostic criteria", "screening", "classification", "A1C", "fasting plasma glucose", "OGTT"),
     "併發症": ("complications", "retinopathy", "kidney", "neuropathy", "cardiovascular"),
     "體重": ("weight", "obesity", "lifestyle", "weight management"),
+    "肥胖": ("obesity", "adiposity", "weight management", "anti-obesity medication", "metabolic surgery"),
     "血糖機": ("blood glucose monitoring", "BGM", "glucose meter"),
     "連續血糖": ("continuous glucose monitoring", "CGM"),
 }
@@ -249,8 +255,9 @@ class QueryVariant:
 
 
 class KnowledgeBase:
-    def __init__(self, root: Path, extra_paths: list[Path] | None = None, chunk_chars: int = 1800) -> None:
-        self.root = root
+    def __init__(self, roots: list[Path], extra_paths: list[Path] | None = None, chunk_chars: int = 1800) -> None:
+        self.roots = roots
+        self.root = roots[0] if roots else Path(".")
         self.extra_paths = extra_paths or []
         self.chunk_chars = chunk_chars
         self.chunks: list[KnowledgeChunk] = []
@@ -261,7 +268,7 @@ class KnowledgeBase:
 
     def load(self) -> None:
         chunks: list[KnowledgeChunk] = []
-        source_files = knowledge_source_files(self.root, self.extra_paths)
+        source_files = knowledge_source_files(self.roots, self.extra_paths)
         for path in source_files:
             chunks.extend(self._chunks_from_file(path))
         self.source_files = source_files
@@ -280,7 +287,7 @@ class KnowledgeBase:
     def _chunks_from_file(self, path: Path) -> list[KnowledgeChunk]:
         text = path.read_text(encoding="utf-8", errors="ignore")
         title = path.stem
-        source_label = guideline_source_label(path.name)
+        source_label = guideline_source_label(path.name, text)
         current_section = ""
         blocks: list[tuple[str, list[str]]] = []
         section_lines: list[str] = []
@@ -432,7 +439,16 @@ def knowledge_strict_enabled() -> bool:
 
 
 def knowledge_dir() -> Path:
-    return Path(os.getenv("LINE_KNOWLEDGE_DIR", DEFAULT_KNOWLEDGE_DIR)).expanduser()
+    return knowledge_dirs()[0]
+
+
+def knowledge_dirs() -> list[Path]:
+    raw = os.getenv("LINE_KNOWLEDGE_DIRS")
+    if raw is None:
+        legacy_dir = os.getenv("LINE_KNOWLEDGE_DIR")
+        raw = legacy_dir if legacy_dir else DEFAULT_KNOWLEDGE_DIRS
+    dirs = [Path(part.strip()).expanduser() for part in re.split(r"[,;\n]+", raw) if part.strip()]
+    return dirs or [Path(DEFAULT_KNOWLEDGE_DIR).expanduser()]
 
 
 def extra_knowledge_paths() -> list[Path]:
@@ -444,12 +460,17 @@ def extra_knowledge_paths() -> list[Path]:
     return [Path(part.strip()).expanduser() for part in re.split(r"[,;\n]+", raw) if part.strip()]
 
 
-def knowledge_source_files(root: Path, extra_paths: list[Path]) -> list[Path]:
+def knowledge_source_files(roots: list[Path], extra_paths: list[Path]) -> list[Path]:
     files: list[Path] = []
-    if root.exists():
-        files.extend(sorted(path for path in root.glob("*.md") if path.is_file()))
-    files.extend(path for path in extra_paths if path.exists() and path.is_file())
-    files = [path for path in files if is_ada_guideline_file(path)]
+    for root in roots:
+        if root.exists() and root.is_dir():
+            files.extend(sorted(path for path in root.rglob("*.md") if path.is_file()))
+    for path in extra_paths:
+        if path.exists() and path.is_file() and path.suffix.lower() == ".md":
+            files.append(path)
+        elif path.exists() and path.is_dir():
+            files.extend(sorted(item for item in path.rglob("*.md") if item.is_file()))
+    files = [path for path in files if is_supported_guideline_file(path)]
 
     deduped: list[Path] = []
     seen: set[str] = set()
@@ -461,25 +482,35 @@ def knowledge_source_files(root: Path, extra_paths: list[Path]) -> list[Path]:
     return deduped
 
 
-def is_ada_guideline_file(path: Path) -> bool:
+def is_supported_guideline_file(path: Path) -> bool:
     lower = path.name.lower()
-    return "ada" in lower or bool(re.search(r"dc26s\d+", lower))
+    if lower.startswith("icon") or "/." in str(path):
+        return False
+    return path.suffix.lower() == ".md"
 
 
-def guideline_source_label(source_name: str) -> str:
-    lower = source_name.lower()
+def guideline_source_label(source_name: str, text: str = "") -> str:
+    lower = f"{source_name}\n{text[:5000]}".lower()
     if "kdigo" in lower:
-        return "KDIGO 2026 Diabetes and CKD Guideline Update"
+        if "2026" in lower and ("public review" in lower or "draft" in lower):
+            return "KDIGO 2026 Diabetes and CKD Guideline Update (Public Review Draft)"
+        if "2024" in lower and "ckd" in lower:
+            return "KDIGO 2024 Clinical Practice Guideline for CKD"
+        if "2022" in lower and ("diabetes" in lower or "ckd" in lower):
+            return "KDIGO 2022 Clinical Practice Guideline for Diabetes Management in CKD"
+        return "KDIGO Clinical Practice Guideline"
     if "aace" in lower:
-        return "AACE 2026"
+        if "2026" in lower:
+            return "AACE 2026 Consensus Statement: Algorithm for Management of Adults With T2D"
+        if "2022" in lower:
+            return "AACE 2022 Clinical Practice Guideline: Diabetes Mellitus Comprehensive Care Plan"
+        return "AACE Clinical Diabetes Guidance"
     if "ada" in lower or re.search(r"dc26s\d+", lower):
         return "ADA Standards of Care in Diabetes 2026"
-    return "本地糖尿病指南知識庫"
+    return "本地臨床指南知識庫"
 
 
 def public_metadata(value: str) -> str:
-    value = re.sub(r"public\s+review\s+draft", "", value, flags=re.I)
-    value = re.sub(r"\bdraft\b", "", value, flags=re.I)
     value = re.sub(r"\s+", " ", value)
     value = value.replace(" - ", " ").replace("--", "-")
     return value.strip(" -_")
@@ -496,6 +527,7 @@ def table_chunks_from_lines(
     table_label = ""
     row_buffer: list[str] = []
     in_html_row = False
+    parent_context = section_parent_context(lines)
 
     for line in lines:
         label_match = re.search(r"\b(Table\s+\d+(?:\.\d+)?[^<\n]*)", line, flags=re.I)
@@ -525,6 +557,8 @@ def table_chunks_from_lines(
                 continue
             prefix = f"{table_label}: " if table_label else "Table row: "
             chunk_text = prefix + row_text
+            if parent_context:
+                chunk_text = f"{chunk_text}\nParent section context: {parent_context}"
             chunks.append(
                 KnowledgeChunk(
                     source,
@@ -537,6 +571,22 @@ def table_chunks_from_lines(
                 )
             )
     return chunks
+
+
+def section_parent_context(lines: list[str]) -> str:
+    context_lines: list[str] = []
+    for line in lines:
+        stripped = clean_cell_text(line)
+        if not stripped:
+            continue
+        if "<tr" in line.lower() or "</tr>" in line.lower() or re.fullmatch(r"\|?\s*[-:| ]+\s*\|?", line.strip()):
+            continue
+        if "|" in line and len(line.split("|")) >= 3:
+            continue
+        context_lines.append(stripped)
+        if len(" ".join(context_lines)) >= int(os.getenv("LINE_KNOWLEDGE_PARENT_CONTEXT_CHARS", "900")):
+            break
+    return " ".join(context_lines)[: int(os.getenv("LINE_KNOWLEDGE_PARENT_CONTEXT_CHARS", "900"))]
 
 
 def table_rows_from_html(value: str) -> list[list[str]]:
@@ -568,20 +618,20 @@ def clean_cell_text(value: str) -> str:
 def load_knowledge_base() -> KnowledgeBase | None:
     if not knowledge_enabled():
         return None
-    root = knowledge_dir()
+    roots = knowledge_dirs()
     extras = extra_knowledge_paths()
     chunk_chars = int(os.getenv("LINE_KNOWLEDGE_CHUNK_CHARS", "1800"))
-    if not root.exists() and not any(path.exists() for path in extras):
+    if not any(root.exists() for root in roots) and not any(path.exists() for path in extras):
         return None
 
     global _knowledge_cache, _knowledge_cache_key
-    cache_key = ("|".join([str(root), *[str(path) for path in extras]]), chunk_chars)
+    cache_key = ("|".join([*[str(root) for root in roots], *[str(path) for path in extras]]), chunk_chars)
     if _knowledge_cache and _knowledge_cache_key == cache_key:
         return _knowledge_cache
     with _knowledge_lock:
         if _knowledge_cache and _knowledge_cache_key == cache_key:
             return _knowledge_cache
-        _knowledge_cache = KnowledgeBase(root, extra_paths=extras, chunk_chars=chunk_chars)
+        _knowledge_cache = KnowledgeBase(roots, extra_paths=extras, chunk_chars=chunk_chars)
         _knowledge_cache_key = cache_key
         return _knowledge_cache
 
@@ -639,11 +689,11 @@ def knowledge_prompt_from_hits(hits: list[KnowledgeHit]) -> str:
         )
 
     lines = [
-        "\n\n背景知識檢索：以下為本次問題相關的 ADA 糖尿病指南片段。",
+        "\n\n背景知識檢索：以下為本次問題相關的已載入臨床指南片段。",
         "嚴格回答規則：只能根據以下片段回答；不要使用模型內建知識、一般醫學常識或推測補完。",
         "若以下片段不足以直接回答使用者問題，請明確說指南片段不足，並停止回答，不要改用其他來源補充。",
         "回答方式：先用 1 句話直接回答，再用 2 到 4 個重點整理指南片段支持的內容；若有藥物限制或 eGFR 門檻，請清楚列出，但不要提供個人化劑量。",
-        "來源標示：回答中請自然標示依據來源，例如「根據 ADA 2026 片段」；不要編造未出現在片段中的來源。",
+        "來源標示：回答中請自然標示依據來源，例如「根據 ADA 2026 / KDIGO / AACE 片段」；不要編造未出現在片段中的來源。",
     ]
     for index, hit in enumerate(hits, start=1):
         lines.extend(
@@ -680,18 +730,20 @@ def knowledge_candidates_prompt(hits: list[KnowledgeHit]) -> str:
 
 def knowledge_status() -> dict[str, object]:
     kb = load_knowledge_base()
-    root = knowledge_dir()
+    roots = knowledge_dirs()
     extras = extra_knowledge_paths()
     extra_existing = [path for path in extras if path.exists() and path.is_file()]
+    dir_file_count = sum(len(list(root.rglob("*.md"))) for root in roots if root.exists() and root.is_dir())
     return {
         "enabled": knowledge_enabled(),
-        "dir": str(root),
+        "dir": str(roots[0]) if roots else "",
+        "dirs": [str(root) for root in roots],
         "extra_paths": [str(path) for path in extras],
         "available": bool(kb),
         "strict": knowledge_strict_enabled(),
         "chunks": len(kb.chunks) if kb else 0,
         "files": len(kb.source_files) if kb else 0,
-        "dir_files": len(list(root.glob("*.md"))) if root.exists() else 0,
+        "dir_files": dir_file_count,
         "extra_files": len(extra_existing),
         "sources": sorted({chunk.source_label for chunk in kb.chunks}) if kb else [],
     }
@@ -780,6 +832,8 @@ def query_variant_specs(query: str) -> list[QueryVariant]:
             ]
         )
 
+    variants.extend(coverage_query_variants(query, query_lower))
+
     if len(variants) == 1:
         tokens = list(expand_query_tokens(query))
         if tokens:
@@ -794,6 +848,55 @@ def query_variant_specs(query: str) -> list[QueryVariant]:
             seen.add(key)
             deduped.append(QueryVariant(variant.label, compact, variant.weight))
     return deduped[:8]
+
+
+def coverage_query_variants(query: str, query_lower: str) -> list[QueryVariant]:
+    variants: list[QueryVariant] = []
+    kidney_query = any(term in query for term in ("腎", "尿蛋白", "白蛋白尿", "腎絲球")) or any(
+        term in query_lower for term in ("ckd", "kidney", "renal", "egfr", "uacr", "albuminuria")
+    )
+    medication_query = any(term in query for term in ("藥", "用藥", "胰島素", "降血糖")) or any(
+        term in query_lower for term in ("medication", "pharmacologic", "sglt", "glp", "metformin", "insulin", "finerenone")
+    )
+    cardiovascular_query = any(term in query for term in ("心", "心血管", "心衰竭", "血壓", "膽固醇")) or any(
+        term in query_lower for term in ("ascvd", "cardiovascular", "heart failure", "hypertension", "lipid")
+    )
+    older_query = any(term in query for term in ("老人", "長者", "高齡")) or any(
+        term in query_lower for term in ("older", "geriatric", "frailty")
+    )
+
+    if kidney_query and medication_query:
+        variants.extend(
+            [
+                QueryVariant(
+                    "coverage_ckd_medication",
+                    f"{query} SGLT2 inhibitor eGFR threshold GLP-1 receptor agonist CKD metformin renal function finerenone nsMRA albuminuria UACR",
+                    0.86,
+                ),
+                QueryVariant(
+                    "coverage_ckd_safety",
+                    f"{query} advanced CKD hypoglycemia risk insulin kidney impairment acute illness perioperative pregnancy older adults contraindication temporary hold",
+                    0.78,
+                ),
+            ]
+        )
+    if cardiovascular_query and medication_query:
+        variants.append(
+            QueryVariant(
+                "coverage_cardiorenal",
+                f"{query} ASCVD heart failure CKD cardiorenal benefit SGLT2 inhibitor GLP-1 receptor agonist blood pressure lipid risk management",
+                0.82,
+            )
+        )
+    if older_query:
+        variants.append(
+            QueryVariant(
+                "coverage_older_adults",
+                f"{query} older adults frailty cognitive impairment functional status hypoglycemia deintensification individualized A1C goal CGM",
+                0.84,
+            )
+        )
+    return variants
 
 
 def dedupe_terms(terms: Iterable[str]) -> list[str]:

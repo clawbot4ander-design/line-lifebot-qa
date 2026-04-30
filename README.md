@@ -16,7 +16,7 @@ Obsidian/Google Drive archiving, image generation, and audio generation.
 ```bash
 LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
-APP_VERSION=2026-04-30-ada-only-v13
+APP_VERSION=2026-04-30-all-guidelines-v14
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -35,8 +35,10 @@ LINE_CONTEXT_TTL_SECONDS=43200
 DATABASE_URL=postgresql://...
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
+LINE_KNOWLEDGE_DIRS=/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIR=/app/data/guidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
+LINE_KNOWLEDGE_PARENT_CONTEXT_CHARS=900
 LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
 LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
 LINE_KNOWLEDGE_MAX_SNIPPETS=5
@@ -46,7 +48,7 @@ LINE_KNOWLEDGE_EXCERPT_CHARS=900
 Minimum variables to add or verify in Zeabur:
 
 ```bash
-APP_VERSION=2026-04-30-ada-only-v13
+APP_VERSION=2026-04-30-all-guidelines-v14
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -55,7 +57,8 @@ LINE_CONTEXT_ENABLED=1
 LINE_SESSION_SCOPE=user
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
+LINE_KNOWLEDGE_DIRS=/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIR=/app/data/guidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_QUERY_PLANNING_ENABLED=1
 LINE_LLM_RERANK_ENABLED=1
@@ -71,15 +74,18 @@ available as an optional provider by setting `LLM_PROVIDER=deepseek`,
 
 ## Background Knowledge
 
-The webhook loads ADA diabetes guideline Markdown files from `LINE_KNOWLEDGE_DIR`
-and ignores extra guideline files when `LINE_KNOWLEDGE_EXTRA_PATHS=0`, then performs local
-file-based retrieval before each LLM answer. This is meant for LINE DM
-patient-education grounding, not for long-term user memory.
+The webhook loads all mounted guideline Markdown files from `LINE_KNOWLEDGE_DIRS`
+or `LINE_KNOWLEDGE_DIR`, then performs local file-based retrieval before each
+LLM answer. This is meant for LINE DM patient-education grounding, not for
+long-term user memory.
 
 Default source inside Zeabur/container:
 
 ```text
+/app/data/guidelines
 /app/data/adaguidelines
+/app/data/kdigoguidelines
+/app/data/aaceguidelines
 ```
 
 Useful settings:
@@ -87,9 +93,11 @@ Useful settings:
 ```bash
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
+LINE_KNOWLEDGE_DIRS=/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
+LINE_KNOWLEDGE_DIR=/app/data/guidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 LINE_KNOWLEDGE_CHUNK_CHARS=1800
+LINE_KNOWLEDGE_PARENT_CONTEXT_CHARS=900
 LINE_KNOWLEDGE_CANDIDATE_SNIPPETS=15
 LINE_KNOWLEDGE_CANDIDATE_EXCERPT_CHARS=700
 LINE_KNOWLEDGE_MAX_SNIPPETS=5
@@ -108,13 +116,15 @@ have permission to redistribute them. Recommended deployment:
 
 1. In Zeabur, create or attach a Volume for this service.
 2. Mount it at `/app/data`.
-3. Put the ADA Markdown files under `/app/data/adaguidelines`.
+3. Put guideline Markdown files under `/app/data/guidelines`, or split them into
+   folders such as `/app/data/adaguidelines`, `/app/data/kdigoguidelines`, and
+   `/app/data/aaceguidelines`.
 4. Set:
 
 ```bash
 LINE_KNOWLEDGE_ENABLED=1
 LINE_KNOWLEDGE_STRICT=1
-LINE_KNOWLEDGE_DIR=/app/data/adaguidelines
+LINE_KNOWLEDGE_DIRS=/app/data/guidelines,/app/data/adaguidelines,/app/data/kdigoguidelines,/app/data/aaceguidelines
 LINE_KNOWLEDGE_EXTRA_PATHS=0
 ```
 
@@ -128,7 +138,9 @@ After redeploy, `GET /` should show:
   "dir_files": 17,
   "extra_files": 0,
   "sources": [
-    "ADA Standards of Care in Diabetes 2026"
+    "ADA Standards of Care in Diabetes 2026",
+    "KDIGO 2024 Clinical Practice Guideline for CKD",
+    "AACE 2026 Consensus Statement: Algorithm for Management of Adults With T2D"
   ]
 }
 ```
@@ -165,12 +177,13 @@ Per message, the flow is:
    must-retrieve topics, and answer strategy.
 2. Use that clinical intent JSON to create a guideline search query with likely
    English terms, abbreviations, section words, and evidence targets.
-3. Search the mounted ADA Markdown files with
+3. Search the mounted guideline Markdown files with
    multi-query retrieval, source-aware scoring, section-aware scoring, and
    indexed metadata such as source, title, section, and table row type.
-4. Split table rows into separate retrievable snippets so medication tables,
-   eGFR thresholds, contraindications, and dosing/use considerations can rank
-   independently.
+4. Split table rows into separate retrievable snippets and attach parent section
+   context so medication tables, eGFR thresholds, contraindications, footnotes,
+   and dosing/use considerations can rank independently without losing their
+   guideline context.
 5. Merge candidates with coverage-aware and MMR-style selection so complementary
    evidence facets, sources, and sections are less likely to be crowded out by
    repeated snippets from one chapter.
@@ -278,7 +291,7 @@ The health check should include:
 
 ```json
 {
-  "app_version": "2026-04-30-ada-only-v13",
+  "app_version": "2026-04-30-all-guidelines-v14",
   "llm_provider": "gemini",
   "model": "gemini-3.1-flash-lite-preview",
   "features": {
@@ -289,8 +302,9 @@ The health check should include:
     "guideline_query_planning": true,
     "clinical_intent_planning": true,
     "guideline_evidence_review": true,
-    "ada_only_sources": true,
-    "multi_guideline_sources": false,
+    "all_mounted_guideline_sources": true,
+    "ada_only_sources": false,
+    "multi_guideline_sources": true,
     "source_aware_reranking": true,
     "section_aware_retrieval": true,
     "table_aware_retrieval": true,
@@ -305,9 +319,10 @@ The health check should include:
     "deepseek_provider": true,
     "llm_reranker": true,
     "coverage_answerability_check": true,
-    "ada_strict_grounding": true,
-    "ada_query_planning": true,
-    "ada_evidence_review": true
+    "parent_child_table_context": true,
+    "guideline_strict_grounding_current": true,
+    "guideline_query_planning_current": true,
+    "guideline_evidence_review_current": true
   }
 }
 ```
