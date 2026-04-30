@@ -590,12 +590,19 @@ def load_keyword_entries() -> list[KeywordEntry]:
 
 
 def matched_keyword_entries(query: str) -> list[KeywordEntry]:
-    query_lower = query.lower()
     matches: list[KeywordEntry] = []
     for entry in load_keyword_entries():
-        if any(trigger in query or trigger.lower() in query_lower for trigger in entry.triggers):
+        if any(keyword_trigger_matches(query, trigger) for trigger in entry.triggers):
             matches.append(entry)
     return matches
+
+
+def keyword_trigger_matches(query: str, trigger: str) -> bool:
+    if not trigger:
+        return False
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", trigger):
+        return bool(re.search(rf"(?<![A-Za-z0-9]){re.escape(trigger)}(?![A-Za-z0-9])", query, flags=re.I))
+    return trigger in query or trigger.lower() in query.lower()
 
 
 def knowledge_source_files(roots: list[Path], extra_paths: list[Path]) -> list[Path]:

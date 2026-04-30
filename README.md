@@ -221,17 +221,18 @@ retrieval, and coverage-oriented search variants.
 Current modules:
 
 ```text
+keywords/ada_2026_chapters.json
 keywords/core_diabetes_ada_aace.json
 keywords/ckd_kdigo.json
 keywords/complications_special_populations.json
 ```
 
-The modules cover ADA/AACE diabetes care terms, KDIGO CKD terms, and
-cross-guideline special populations/safety terms. They connect Chinese user
-language with guideline terms such as `MASLD`, `MASH`, `NAFLD`, `NASH`, `CKD`,
-`DKD`, `eGFR`, `UACR`, `SGLT2 inhibitor`, `GLP-1 RA`, `finerenone`, `ASCVD`,
-`heart failure`, `hypoglycemia`, `GDM`, `older adults`, `perioperative`, and
-`foot care`.
+The modules cover ADA 2026 chapter routing, ADA/AACE diabetes care terms, KDIGO
+CKD terms, and cross-guideline special populations/safety terms. They connect
+Chinese user language with guideline terms such as `dc26s011`, `MASLD`, `MASH`,
+`NAFLD`, `NASH`, `CKD`, `DKD`, `eGFR`, `UACR`, `SGLT2 inhibitor`, `GLP-1 RA`,
+`finerenone`, `ASCVD`, `heart failure`, `hypoglycemia`, `GDM`, `older adults`,
+`perioperative`, and `foot care`.
 
 Each entry uses this shape:
 

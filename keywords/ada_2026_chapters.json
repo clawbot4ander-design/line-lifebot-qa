@@ -1,0 +1,159 @@
+{
+  "name": "ada_2026_chapters",
+  "description": "Chapter-aware routing keywords for ADA Standards of Care in Diabetes 2026 sections 1-17.",
+  "entries": [
+    {
+      "id": "ada_s001_population_health",
+      "triggers": ["S1", "section 1", "dc26s001", "照護品質", "族群健康", "健康不平等", "社會決定因素", "health equity", "population health", "quality improvement"],
+      "expansions": ["dc26s001", "section 1", "Improving Care and Promoting Health in Populations", "population health", "health equity", "social determinants of health", "SDOH", "quality improvement", "team-based care", "community health workers", "telehealth", "care delivery", "cost-related barriers"],
+      "variant_queries": [
+        "ADA section 1 dc26s001 improving care promoting health populations health equity social determinants quality improvement",
+        "population health diabetes care delivery team-based care community health workers telehealth cost barriers"
+      ]
+    },
+    {
+      "id": "ada_s002_diagnosis_classification",
+      "triggers": ["S2", "section 2", "dc26s002", "診斷", "分類", "糖尿病前期", "篩檢", "OGTT", "A1C 診斷", "type 1", "type 2", "LADA"],
+      "expansions": ["dc26s002", "section 2", "Diagnosis and Classification of Diabetes", "diagnostic criteria", "screening", "prediabetes", "type 1 diabetes", "type 2 diabetes", "gestational diabetes", "A1C", "fasting plasma glucose", "OGTT", "random plasma glucose", "autoantibodies", "C-peptide", "LADA"],
+      "variant_queries": [
+        "ADA section 2 dc26s002 diagnosis classification diabetes A1C FPG OGTT random plasma glucose criteria",
+        "screening prediabetes type 1 type 2 gestational diabetes autoantibodies C-peptide LADA"
+      ]
+    },
+    {
+      "id": "ada_s003_prevention_delay",
+      "triggers": ["S3", "section 3", "dc26s003", "預防糖尿病", "延緩糖尿病", "糖尿病前期治療", "DPP", "prevention", "delay diabetes", "prediabetes metformin"],
+      "expansions": ["dc26s003", "section 3", "Prevention or Delay of Diabetes and Associated Comorbidities", "prediabetes", "diabetes prevention program", "DPP", "lifestyle intervention", "weight loss", "physical activity", "metformin prevention", "cardiovascular risk factors", "comorbidities"],
+      "variant_queries": [
+        "ADA section 3 dc26s003 prevention delay diabetes prediabetes lifestyle intervention DPP weight loss",
+        "prediabetes metformin prevention cardiovascular risk factors associated comorbidities"
+      ]
+    },
+    {
+      "id": "ada_s004_comorbidities_masld",
+      "triggers": ["S4", "section 4", "dc26s004", "共病", "完整評估", "初診評估", "疫苗", "睡眠", "牙周", "脂肪肝", "MASLD", "MASH", "NAFLD", "NASH", "肝硬化"],
+      "expansions": ["dc26s004", "section 4", "Comprehensive Medical Evaluation and Assessment of Comorbidities", "medical evaluation", "comorbidities", "immunizations", "vaccination", "sleep health", "periodontal disease", "cancer", "disability", "MASLD", "MASH", "NAFLD", "NASH", "FIB-4", "liver fibrosis", "cirrhosis"],
+      "variant_queries": [
+        "ADA section 4 dc26s004 comprehensive medical evaluation comorbidities immunizations sleep periodontal cancer disability",
+        "MASLD MASH NAFLD NASH FIB-4 liver fibrosis cirrhosis diabetes assessment management"
+      ]
+    },
+    {
+      "id": "ada_s005_health_behaviors_wellbeing",
+      "triggers": ["S5", "section 5", "dc26s005", "飲食", "營養", "運動", "生活型態", "衛教", "心理", "憂鬱", "戒菸", "nutrition", "DSMES", "exercise"],
+      "expansions": ["dc26s005", "section 5", "Facilitating Positive Health Behaviors and Well-being", "DSMES", "diabetes self-management education and support", "medical nutrition therapy", "MNT", "eating patterns", "carbohydrate", "physical activity", "exercise", "smoking cessation", "psychosocial care", "diabetes distress", "depression", "sleep", "well-being"],
+      "variant_queries": [
+        "ADA section 5 dc26s005 DSMES medical nutrition therapy eating patterns physical activity exercise smoking cessation",
+        "psychosocial care diabetes distress depression well-being health behaviors lifestyle"
+      ]
+    },
+    {
+      "id": "ada_s006_glycemic_goals_crises",
+      "triggers": ["S6", "section 6", "dc26s006", "血糖目標", "A1C 目標", "低血糖", "高血糖急症", "DKA", "HHS", "time in range", "hypoglycemia"],
+      "expansions": ["dc26s006", "section 6", "Glycemic Goals, Hypoglycemia, and Hyperglycemic Crises", "glycemic goals", "A1C goal", "individualized targets", "CGM metrics", "time in range", "TIR", "hypoglycemia", "severe hypoglycemia", "glucagon", "hyperglycemic crises", "DKA", "HHS", "ketones"],
+      "variant_queries": [
+        "ADA section 6 dc26s006 glycemic goals A1C individualized targets CGM metrics time in range",
+        "hypoglycemia severe hypoglycemia glucagon DKA HHS hyperglycemic crises ketones"
+      ]
+    },
+    {
+      "id": "ada_s007_diabetes_technology",
+      "triggers": ["S7", "section 7", "dc26s007", "糖尿病科技", "連續血糖", "血糖機", "胰島素幫浦", "閉環", "AID", "CGM", "BGM", "pump"],
+      "expansions": ["dc26s007", "section 7", "Diabetes Technology", "CGM", "continuous glucose monitoring", "BGM", "blood glucose monitoring", "insulin pump", "CSII", "automated insulin delivery", "AID", "hybrid closed loop", "smart insulin pen", "connected insulin pen", "digital health"],
+      "variant_queries": [
+        "ADA section 7 dc26s007 diabetes technology CGM BGM insulin pump CSII automated insulin delivery AID",
+        "hybrid closed loop smart insulin pen connected insulin pen digital health glucose monitoring"
+      ]
+    },
+    {
+      "id": "ada_s008_obesity_weight",
+      "triggers": ["S8", "section 8", "dc26s008", "肥胖", "體重", "減重", "BMI", "代謝手術", "bariatric", "obesity", "weight management"],
+      "expansions": ["dc26s008", "section 8", "Obesity and Weight Management", "overweight", "obesity", "BMI", "weight management", "weight loss", "anti-obesity medication", "GLP-1 RA", "dual GIP and GLP-1 RA", "tirzepatide", "semaglutide", "metabolic surgery", "bariatric surgery"],
+      "variant_queries": [
+        "ADA section 8 dc26s008 obesity weight management overweight BMI weight loss anti-obesity medication",
+        "GLP-1 RA tirzepatide semaglutide metabolic surgery bariatric surgery diabetes"
+      ]
+    },
+    {
+      "id": "ada_s009_pharmacologic_treatment",
+      "triggers": ["S9", "section 9", "dc26s009", "藥物治療", "降血糖藥", "metformin", "SGLT2", "GLP", "胰島素", "pioglitazone", "tirzepatide", "pharmacologic"],
+      "expansions": ["dc26s009", "section 9", "Pharmacologic Approaches to Glycemic Treatment", "glucose-lowering therapy", "metformin", "SGLT2 inhibitor", "GLP-1 receptor agonist", "dual GIP and GLP-1 receptor agonist", "tirzepatide", "insulin", "basal insulin", "prandial insulin", "sulfonylurea", "DPP-4 inhibitor", "TZD", "pioglitazone", "MASH", "CKD", "ASCVD", "heart failure"],
+      "variant_queries": [
+        "ADA section 9 dc26s009 pharmacologic approaches glycemic treatment metformin SGLT2 inhibitor GLP-1 RA tirzepatide insulin",
+        "glucose-lowering therapy ASCVD heart failure CKD obesity MASH medication selection hypoglycemia weight"
+      ]
+    },
+    {
+      "id": "ada_s010_cardiovascular_risk",
+      "triggers": ["S10", "section 10", "dc26s010", "心血管", "ASCVD", "心衰竭", "血壓", "高血壓", "膽固醇", "statin", "LDL", "aspirin"],
+      "expansions": ["dc26s010", "section 10", "Cardiovascular Disease and Risk Management", "ASCVD", "MACE", "heart failure", "HF", "blood pressure", "hypertension", "lipid management", "statin", "LDL-C", "triglycerides", "antiplatelet", "aspirin", "smoking cessation", "cardiorenal"],
+      "variant_queries": [
+        "ADA section 10 dc26s010 cardiovascular disease risk management ASCVD MACE heart failure blood pressure hypertension",
+        "lipid management statin LDL-C triglycerides antiplatelet aspirin smoking cessation cardiorenal"
+      ]
+    },
+    {
+      "id": "ada_s011_chronic_kidney_disease",
+      "triggers": ["S11", "section 11", "dc26s011", "腎臟病", "腎病變", "腎絲球", "尿蛋白", "UACR", "eGFR", "CKD", "albuminuria", "finerenone"],
+      "expansions": ["dc26s011", "section 11", "Chronic Kidney Disease and Risk Management", "CKD", "chronic kidney disease", "diabetic kidney disease", "eGFR", "UACR", "albuminuria", "urine albumin-to-creatinine ratio", "SGLT2 inhibitor", "GLP-1 RA", "finerenone", "ACE inhibitor", "ARB", "blood pressure", "kidney failure", "dialysis"],
+      "variant_queries": [
+        "ADA section 11 dc26s011 chronic kidney disease CKD eGFR UACR albuminuria diabetic kidney disease",
+        "SGLT2 inhibitor GLP-1 RA finerenone ACE inhibitor ARB kidney failure dialysis CKD risk management"
+      ]
+    },
+    {
+      "id": "ada_s012_microvascular_foot",
+      "triggers": ["S12", "section 12", "dc26s012", "視網膜", "眼底", "神經病變", "足部", "腳", "傷口", "潰瘍", "retinopathy", "neuropathy", "foot"],
+      "expansions": ["dc26s012", "section 12", "Retinopathy, Neuropathy, and Foot Care", "diabetic retinopathy", "dilated eye examination", "retinal photography", "macular edema", "anti-VEGF", "diabetic neuropathy", "peripheral neuropathy", "autonomic neuropathy", "foot care", "foot ulcer", "monofilament", "loss of protective sensation", "LOPS", "peripheral arterial disease", "PAD"],
+      "variant_queries": [
+        "ADA section 12 dc26s012 retinopathy dilated eye examination retinal photography macular edema anti-VEGF",
+        "neuropathy foot care foot ulcer monofilament loss of protective sensation PAD peripheral arterial disease"
+      ]
+    },
+    {
+      "id": "ada_s013_older_adults",
+      "triggers": ["S13", "section 13", "dc26s013", "老人", "長者", "高齡", "衰弱", "失智", "照護機構", "older adults", "frailty"],
+      "expansions": ["dc26s013", "section 13", "Older Adults", "older adults", "frailty", "cognitive impairment", "functional status", "life expectancy", "complex health", "very complex health", "A1C goal", "hypoglycemia risk", "deintensification", "simplification", "long-term care", "palliative care", "CGM"],
+      "variant_queries": [
+        "ADA section 13 dc26s013 older adults frailty cognitive impairment functional status life expectancy A1C goals",
+        "hypoglycemia risk deintensification simplification long-term care palliative care CGM"
+      ]
+    },
+    {
+      "id": "ada_s014_children_adolescents",
+      "triggers": ["S14", "section 14", "dc26s014", "兒童", "青少年", "小孩", "學校", "青春期", "pediatric", "children", "adolescents", "youth"],
+      "expansions": ["dc26s014", "section 14", "Children and Adolescents", "pediatric", "children", "adolescents", "youth", "type 1 diabetes", "type 2 diabetes in youth", "school", "growth", "puberty", "CGM", "insulin pump", "DKA", "hypoglycemia", "family support", "transition to adult care"],
+      "variant_queries": [
+        "ADA section 14 dc26s014 children adolescents youth pediatric type 1 diabetes type 2 diabetes school growth puberty",
+        "CGM insulin pump DKA hypoglycemia family support transition to adult care"
+      ]
+    },
+    {
+      "id": "ada_s015_pregnancy",
+      "triggers": ["S15", "section 15", "dc26s015", "懷孕", "妊娠", "孕婦", "妊娠糖尿病", "GDM", "產後", "pregnancy", "gestational"],
+      "expansions": ["dc26s015", "section 15", "Management of Diabetes in Pregnancy", "pregnancy", "preconception", "gestational diabetes mellitus", "GDM", "insulin", "CGM", "glycemic goals in pregnancy", "retinopathy monitoring", "preeclampsia", "postpartum", "breastfeeding", "contraception"],
+      "variant_queries": [
+        "ADA section 15 dc26s015 management diabetes pregnancy preconception glycemic goals insulin CGM",
+        "gestational diabetes mellitus GDM retinopathy monitoring preeclampsia postpartum breastfeeding contraception"
+      ]
+    },
+    {
+      "id": "ada_s016_hospital_care",
+      "triggers": ["S16", "section 16", "dc26s016", "住院", "開刀", "手術", "禁食", "病房", "ICU", "hospital", "inpatient", "perioperative", "NPO"],
+      "expansions": ["dc26s016", "section 16", "Diabetes Care in the Hospital", "hospital care", "inpatient", "critical illness", "noncritical illness", "ICU", "perioperative", "surgery", "NPO", "insulin", "glucose target", "hypoglycemia", "hyperglycemia", "DKA", "HHS", "SGLT2 inhibitor hold", "transition of care"],
+      "variant_queries": [
+        "ADA section 16 dc26s016 diabetes care hospital inpatient ICU critical illness noncritical illness glucose target insulin",
+        "perioperative surgery NPO hypoglycemia hyperglycemia DKA HHS SGLT2 inhibitor hold transition of care"
+      ]
+    },
+    {
+      "id": "ada_s017_advocacy",
+      "triggers": ["S17", "section 17", "dc26s017", "倡議", "權益", "職場", "學校權益", "駕駛", "歧視", "advocacy", "employment", "driving", "discrimination"],
+      "expansions": ["dc26s017", "section 17", "Diabetes Advocacy", "advocacy", "rights", "discrimination", "employment", "school", "driving", "licensing", "access to care", "access to medications", "legal protections", "people with diabetes"],
+      "variant_queries": [
+        "ADA section 17 dc26s017 diabetes advocacy rights discrimination employment school driving licensing",
+        "access to care access to medications legal protections people with diabetes"
+      ]
+    }
+  ]
+}
