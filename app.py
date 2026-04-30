@@ -79,7 +79,7 @@ except ModuleNotFoundError:
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 DEEPSEEK_API_BASE = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
-APP_VERSION = os.getenv("APP_VERSION", "2026-05-01-light-agents-v25")
+APP_VERSION = os.getenv("APP_VERSION", "2026-05-01-multi-agent-v24")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
@@ -103,7 +103,6 @@ LINE_EVIDENCE_REVIEW_ENABLED = os.getenv("LINE_EVIDENCE_REVIEW_ENABLED", "1").st
     "no",
     "off",
 }
-LINE_EVIDENCE_REVIEW_MODE = os.getenv("LINE_EVIDENCE_REVIEW_MODE", "adaptive").strip().lower()
 LINE_LLM_RERANK_ENABLED = os.getenv("LINE_LLM_RERANK_ENABLED", "1").strip().lower() not in {
     "0",
     "false",
@@ -125,7 +124,6 @@ LINE_LONG_CONTEXT_VERIFICATION_ENABLED = os.getenv("LINE_LONG_CONTEXT_VERIFICATI
     "no",
     "off",
 }
-LINE_LONG_CONTEXT_VERIFICATION_MODE = os.getenv("LINE_LONG_CONTEXT_VERIFICATION_MODE", "adaptive").strip().lower()
 LINE_WHOLE_SECTION_CONTEXT_ENABLED = os.getenv("LINE_WHOLE_SECTION_CONTEXT_ENABLED", "1").strip().lower() not in {
     "0",
     "false",
@@ -139,12 +137,6 @@ LINE_DEBUG_SEARCH_ENABLED = os.getenv("LINE_DEBUG_SEARCH_ENABLED", "1").strip().
     "off",
 }
 LINE_MULTI_AGENT_ENABLED = os.getenv("LINE_MULTI_AGENT_ENABLED", "1").strip().lower() not in {
-    "0",
-    "false",
-    "no",
-    "off",
-}
-LINE_ADAPTIVE_SAFETY_ENABLED = os.getenv("LINE_ADAPTIVE_SAFETY_ENABLED", "1").strip().lower() not in {
     "0",
     "false",
     "no",
@@ -1157,79 +1149,6 @@ def retrieval_failure_analyzer_agent(
     }
 
 
-def high_risk_or_complex_question(user_text: str, clinical_intent: dict[str, Any] | None = None) -> bool:
-    lower = f"{user_text} {clinical_intent_text(clinical_intent)}".lower()
-    if comparative_threshold_question(user_text):
-        return True
-    if any(term in user_text for term in ("懷孕", "妊娠", "洗腎", "透析", "腎衰竭", "手術", "住院", "低血糖", "酮酸", "急性")):
-        return True
-    return any(
-        term in lower
-        for term in (
-            "pregnancy",
-            "dialysis",
-            "eskd",
-            "esrd",
-            "perioperative",
-            "hospital",
-            "hypoglycemia",
-            "dka",
-            "hhs",
-            "contraindication",
-            "eGFR".lower(),
-            "threshold",
-        )
-    )
-
-
-def should_run_evidence_review(
-    user_text: str,
-    selected_hits: list[KnowledgeHit],
-    clinical_intent: dict[str, Any] | None,
-    coverage_gaps: str,
-    coverage_agent: dict[str, Any],
-) -> bool:
-    if not LINE_EVIDENCE_REVIEW_ENABLED:
-        return False
-    if LINE_EVIDENCE_REVIEW_MODE in {"always", "1", "true", "on"}:
-        return True
-    if LINE_EVIDENCE_REVIEW_MODE in {"never", "0", "false", "off"}:
-        return False
-    if not LINE_ADAPTIVE_SAFETY_ENABLED:
-        return True
-    return bool(
-        coverage_gaps
-        or coverage_agent.get("missing_facets")
-        or high_risk_or_complex_question(user_text, clinical_intent)
-        or len(selected_hits) < 2
-    )
-
-
-def should_run_long_context_verification(
-    user_text: str,
-    selected_hits: list[KnowledgeHit],
-    clinical_intent: dict[str, Any] | None,
-    coverage_gaps: str,
-    coverage_agent: dict[str, Any],
-    evidence_review: str,
-) -> bool:
-    if not LINE_LONG_CONTEXT_VERIFICATION_ENABLED:
-        return False
-    if LINE_LONG_CONTEXT_VERIFICATION_MODE in {"always", "1", "true", "on"}:
-        return True
-    if LINE_LONG_CONTEXT_VERIFICATION_MODE in {"never", "0", "false", "off"}:
-        return False
-    if not LINE_ADAPTIVE_SAFETY_ENABLED:
-        return True
-    return bool(
-        coverage_gaps
-        or coverage_agent.get("missing_facets")
-        or evidence_review_says_unanswerable(evidence_review)
-        or high_risk_or_complex_question(user_text, clinical_intent)
-        or any(str(getattr(hit, "chunk_type", "")) == "whole_section" for hit in selected_hits)
-    )
-
-
 def hit_identity(hit: KnowledgeHit) -> tuple[str, str, str, str]:
     return (
         str(getattr(hit, "source", "")),
@@ -1821,10 +1740,7 @@ def llm_answer(user_text: str, line_user_id: str = "") -> str:
         return knowledge_no_answer_text()
 
     knowledge_text = knowledge_prompt_from_hits(selected_hits)
-    coverage_agent = evidence_coverage_agent(user_text, selected_hits, clinical_intent)
-    evidence_review = ""
-    if should_run_evidence_review(user_text, selected_hits, clinical_intent, coverage_gaps, coverage_agent):
-        evidence_review = build_evidence_review(api_key, user_text, knowledge_text, clinical_intent)
+    evidence_review = build_evidence_review(api_key, user_text, knowledge_text, clinical_intent)
     if evidence_review_says_unanswerable(evidence_review):
         locally_answerable, _local_gap = local_evidence_coverage(user_text, selected_hits, clinical_intent)
         if not (comparative_threshold_question(user_text) and locally_answerable):
@@ -1834,22 +1750,13 @@ def llm_answer(user_text: str, line_user_id: str = "") -> str:
             + "\n\n本地 coverage override：此題可用指南片段中的 eGFR 門檻做比較式回答；"
             "不要補充片段外資訊，也不要給個人化劑量。"
         )
-    long_context_verification = ""
-    if should_run_long_context_verification(
+    long_context_verification = build_long_context_verification(
+        api_key,
         user_text,
         selected_hits,
         clinical_intent,
-        coverage_gaps,
-        coverage_agent,
         evidence_review,
-    ):
-        long_context_verification = build_long_context_verification(
-            api_key,
-            user_text,
-            selected_hits,
-            clinical_intent,
-            evidence_review,
-        )
+    )
     if long_context_says_unverified(long_context_verification):
         locally_answerable, _local_gap = local_evidence_coverage(user_text, selected_hits, clinical_intent)
         if not (comparative_threshold_question(user_text) and locally_answerable):
@@ -1931,12 +1838,10 @@ def health() -> dict[str, Any]:
             "guideline_query_planning": LINE_QUERY_PLANNING_ENABLED,
             "clinical_intent_planning": LINE_QUERY_PLANNING_ENABLED,
             "conditional_multi_agent_pipeline": LINE_MULTI_AGENT_ENABLED,
-            "adaptive_safety_pipeline": LINE_ADAPTIVE_SAFETY_ENABLED,
             "evidence_coverage_agent": LINE_MULTI_AGENT_ENABLED,
             "retrieval_failure_analyzer_agent": LINE_MULTI_AGENT_ENABLED,
             "regression_test_agent": LINE_MULTI_AGENT_ENABLED,
             "guideline_evidence_review": LINE_EVIDENCE_REVIEW_ENABLED,
-            "guideline_evidence_review_mode": LINE_EVIDENCE_REVIEW_MODE,
             "all_mounted_guideline_sources": True,
             "ada_only_sources": False,
             "multi_guideline_sources": True,
@@ -1969,7 +1874,6 @@ def health() -> dict[str, Any]:
             "local_hashed_vector_index": True,
             "inverted_index_retrieval": True,
             "long_context_verification": LINE_LONG_CONTEXT_VERIFICATION_ENABLED,
-            "long_context_verification_mode": LINE_LONG_CONTEXT_VERIFICATION_MODE,
             "debug_search_endpoint": LINE_DEBUG_SEARCH_ENABLED,
             "debug_regression_endpoint": LINE_DEBUG_SEARCH_ENABLED,
             "guideline_strict_grounding_current": True,

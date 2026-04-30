@@ -16,7 +16,7 @@ Obsidian/Google Drive archiving, image generation, and audio generation.
 ```bash
 LINE_CHANNEL_SECRET=...
 LINE_CHANNEL_ACCESS_TOKEN=...
-APP_VERSION=2026-05-01-light-agents-v25
+APP_VERSION=2026-05-01-multi-agent-v24
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -28,14 +28,11 @@ LINE_RECURSIVE_COVERAGE_ENABLED=1
 LINE_RECURSIVE_COVERAGE_MAX_QUERIES=4
 LINE_RECURSIVE_COVERAGE_MAX_HITS=4
 LINE_EVIDENCE_REVIEW_ENABLED=1
-LINE_EVIDENCE_REVIEW_MODE=adaptive
 LINE_LONG_CONTEXT_VERIFICATION_ENABLED=1
-LINE_LONG_CONTEXT_VERIFICATION_MODE=adaptive
 LINE_WHOLE_SECTION_CONTEXT_ENABLED=1
 LINE_WHOLE_SECTION_CONTEXT_MAX_SECTIONS=2
 LINE_WHOLE_SECTION_CONTEXT_CHARS=9000
 LINE_MULTI_AGENT_ENABLED=1
-LINE_ADAPTIVE_SAFETY_ENABLED=1
 LINE_DEBUG_SEARCH_ENABLED=1
 LINE_DEBUG_SEARCH_MAX_HITS=12
 # Optional: if set, /debug/search and /debug/regression require x-debug-token header.
@@ -74,7 +71,7 @@ LINE_KNOWLEDGE_EXCERPT_CHARS=900
 Minimum variables to add or verify in Zeabur:
 
 ```bash
-APP_VERSION=2026-05-01-light-agents-v25
+APP_VERSION=2026-05-01-multi-agent-v24
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-3.1-flash-lite-preview
@@ -90,12 +87,9 @@ LINE_QUERY_PLANNING_ENABLED=1
 LINE_LLM_RERANK_ENABLED=1
 LINE_RECURSIVE_COVERAGE_ENABLED=1
 LINE_EVIDENCE_REVIEW_ENABLED=1
-LINE_EVIDENCE_REVIEW_MODE=adaptive
 LINE_LONG_CONTEXT_VERIFICATION_ENABLED=1
-LINE_LONG_CONTEXT_VERIFICATION_MODE=adaptive
 LINE_WHOLE_SECTION_CONTEXT_ENABLED=1
 LINE_MULTI_AGENT_ENABLED=1
-LINE_ADAPTIVE_SAFETY_ENABLED=1
 LINE_DEBUG_SEARCH_ENABLED=1
 ```
 
@@ -211,14 +205,10 @@ LINE_RECURSIVE_COVERAGE_ENABLED=1
 LINE_RECURSIVE_COVERAGE_MAX_QUERIES=4
 LINE_RECURSIVE_COVERAGE_MAX_HITS=4
 LINE_EVIDENCE_REVIEW_ENABLED=1
-LINE_EVIDENCE_REVIEW_MODE=adaptive
 LINE_LONG_CONTEXT_VERIFICATION_ENABLED=1
-LINE_LONG_CONTEXT_VERIFICATION_MODE=adaptive
 LINE_WHOLE_SECTION_CONTEXT_ENABLED=1
 LINE_WHOLE_SECTION_CONTEXT_MAX_SECTIONS=2
 LINE_WHOLE_SECTION_CONTEXT_CHARS=9000
-LINE_MULTI_AGENT_ENABLED=1
-LINE_ADAPTIVE_SAFETY_ENABLED=1
 LINE_DEBUG_SEARCH_ENABLED=1
 LINE_DEBUG_SEARCH_MAX_HITS=12
 LINE_RETRIEVAL_QUERY_MAX_CHARS=1400
@@ -487,7 +477,7 @@ The health check should include:
 
 ```json
 {
-  "app_version": "2026-05-01-light-agents-v25",
+  "app_version": "2026-05-01-multi-agent-v24",
   "llm_provider": "gemini",
   "model": "gemini-3.1-flash-lite-preview",
   "features": {
@@ -498,12 +488,10 @@ The health check should include:
     "guideline_query_planning": true,
     "clinical_intent_planning": true,
     "conditional_multi_agent_pipeline": true,
-    "adaptive_safety_pipeline": true,
     "evidence_coverage_agent": true,
     "retrieval_failure_analyzer_agent": true,
     "regression_test_agent": true,
     "guideline_evidence_review": true,
-    "guideline_evidence_review_mode": "adaptive",
     "all_mounted_guideline_sources": true,
     "ada_only_sources": false,
     "multi_guideline_sources": true,
@@ -536,7 +524,6 @@ The health check should include:
     "local_hashed_vector_index": true,
     "inverted_index_retrieval": true,
     "long_context_verification": true,
-    "long_context_verification_mode": "adaptive",
     "debug_search_endpoint": true,
     "debug_regression_endpoint": true,
     "guideline_strict_grounding_current": true,

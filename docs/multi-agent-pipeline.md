@@ -109,34 +109,6 @@ Endpoint：
 - 現在最重要的是「知道為什麼搜尋失敗」和「防止更新後退步」。
 - Coverage / Failure / Regression 已經形成品質閉環。
 
-## 一般問答路徑要保持輕量
-
-一般 LINE 問答不應每次跑所有重型 agent。建議：
-
-```text
-一般問題：
-Clinical Search Brain → Retrieval → Evidence Coverage Agent → Answer
-
-coverage 不足 / high-risk / debug：
-+ Evidence review
-+ Long-context verification
-+ Failure Analyzer Agent
-
-部署前 / 修改 retrieval 後：
-+ Regression Test Agent
-```
-
-`Evidence Coverage Agent` 是本地 facet 檢查，成本很低，可以常駐。
-`Failure Analyzer Agent` 和 `Regression Test Agent` 應主要放在 debug / 部署檢查。
-
-Adaptive safety 預設：
-
-```bash
-LINE_EVIDENCE_REVIEW_MODE=adaptive
-LINE_LONG_CONTEXT_VERIFICATION_MODE=adaptive
-LINE_ADAPTIVE_SAFETY_ENABLED=1
-```
-
 下一階段可考慮：
 
 - Citation Audit Agent：確認最終答案每個重點都有來源片段。
@@ -147,7 +119,6 @@ LINE_ADAPTIVE_SAFETY_ENABLED=1
 
 ```bash
 LINE_MULTI_AGENT_ENABLED=1
-LINE_ADAPTIVE_SAFETY_ENABLED=1
 LINE_DEBUG_SEARCH_ENABLED=1
 ```
 
@@ -156,9 +127,9 @@ Health check：
 ```json
 {
   "conditional_multi_agent_pipeline": true,
-  "adaptive_safety_pipeline": true,
   "evidence_coverage_agent": true,
   "retrieval_failure_analyzer_agent": true,
   "regression_test_agent": true
 }
 ```
+
